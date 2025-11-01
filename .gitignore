@@ -1,0 +1,33 @@
+# Logs
+*.log
+logs/
+*.log.*
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules
+node_modules/
+
+# Personal config files
+config.json
+settings.json
+
+# API Keys
+.env
+.env.local
+*.key
+
+# Temporary files
+tmp/
+temp/
+*.tmp
