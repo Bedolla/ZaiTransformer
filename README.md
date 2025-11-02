@@ -28,6 +28,13 @@
    - [Understanding Reasoning Modes](#understanding-reasoning-modes)
    - [Sampling Control (Temperature & Top-P)](#sampling-control-temperature--top-p)
 9. [Troubleshooting](#troubleshooting)
+   - [CCR Won't Start](#ccr-wont-start)
+   - [Z.ai API Key Invalid](#zai-api-key-invalid)
+   - [Thinking Not Working](#thinking-not-working)
+   - [Debug Logs Too Large](#debug-logs-too-large)
+   - [Connection Fails with Specific IP](#connection-fails-with-specific-ip)
+   - [Claude Code Not Displaying Thinking](#claude-code-not-displaying-thinking)
+   - [Using CCR Built-in Transformers Only](#using-ccr-built-in-transformers-only)
 10. [Additional Resources](#additional-resources)
 
 ---
@@ -207,7 +214,9 @@ ccr version
       ],
       "transformer": {
         "use": [
-          "zai"
+          "zai",
+          "reasoning" // ← Converts OpenAI's reasoning_content to Anthropic's thinking format
+                      // ← Generates signatures to display thinking in Claude Code
         ]
       }
     }
@@ -220,8 +229,7 @@ ccr version
     "longContextThreshold": 204800,
     "webSearch": "ZAI,glm-4.6",
     "image": "ZAI,glm-4.5v"
-  },
-  "stream": true
+  }
 }
 ```
 **macOS Path Example:**
@@ -1070,67 +1078,131 @@ The debug transformer automatically rotates logs at 10 MB. To adjust:
 
 ---
 
-### Claude Code Not Displaying Thinking (Cosmetic)
+### Claude Code Not Displaying Thinking
 
-**Observation:** Claude Code may not show the model's reasoning/thinking process, even when reasoning is active
+**Problem:** Claude Code doesn't show the model's reasoning/thinking process, even when reasoning is active.
 
-**Possible Cause:** This **could be** a cosmetic limitation in how Claude Code Router translates provider responses to Claude Code's expected format. The actual reasoning appears to be happening on the model side (as evidenced by debug logs) but may not be displayed in the Claude Code interface.
+**Cause:** OpenAI-compatible providers (like Z.ai) send `reasoning_content` but don't include the `signature` field that Claude Code requires to display thinking blocks.
 
-**Impact (if this is occurring):**
-- ✓ Model reasoning **appears to work normally** (no functional impact)
-- ✓ Response quality **seems unaffected**
-- ✗ Thinking process **may not be visible** in Claude Code
+**Solution:** Add CCR's internal `"reasoning"` transformer to the provider configuration.
 
-**Note:** This is based on observation and has not been fully verified. It's unclear whether:
-- Claude Code Router has not implemented thinking block transformation, OR
-- Claude Code Router has implemented it but there's a configuration issue, OR
-- The feature works correctly and this observation is incorrect
+**Configuration in `config.json`:**
 
-**Technical Context:**
-
-Claude Code expects thinking blocks in this format (per Anthropic documentation):
 ```json
 {
-  "content": [
-    {
-      "type": "thinking",
-      "thinking": "Let me analyze this step by step...",
-      "signature": "sha256:abc123..."
-    },
-    {
-      "type": "text",
-      "text": "Based on my analysis..."
-    }
-  ]
+  "name": "ZAI",
+  "api_base_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+  "api_key": "YOUR_ZAI_API_KEY_HERE",
+  "models": [
+    "glm-4.6",
+    "glm-4.5",
+    "glm-4.5v",
+    "glm-4.5-air"
+  ],
+  "transformer": {
+    "use": [
+      "zai",
+      "reasoning" // ← Converts OpenAI's reasoning_content to Anthropic's thinking format
+                  // ← Generates signatures to display thinking in Claude Code
+    ]
+  }
 }
 ```
 
-For this to work, Claude Code Router would need to:
-1. Implement a stream reassembler to capture `reasoning_content` chunks from Z.ai
-2. Generate thinking blocks with SHA256 audit signatures
-3. Transform them into Anthropic's extended thinking format
+**What does `ReasoningTransformer` do?**
 
-**Reference:** https://anthropic.mintlify.app/en/docs/build-with-claude/extended-thinking
+- Reads `reasoning_content` blocks from the provider's response
+- Auto-generates signatures (`signature = Date.now().toString()`)
+- Converts OpenAI format to Anthropic format with signatures
+- Enables Claude Code to display: `∴ Thought for 1s (ctrl+o to show thinking)`
 
-**What We Know:**
+**Result:** Thinking blocks are now visible in Claude Code.
 
-This is **outside the scope** of the custom transformers (`zai.js` and `zai-debug.js`). The transformers handle request transformation (Claude Code → Z.ai), but thinking block display would require response transformation at the CCR level (Z.ai → Claude Code).
+**References:**
+- **ReasoningTransformer (source code):** https://github.com/musistudio/llms/blob/main/src/transformers/reasoning.transformer.ts
+- **Anthropic Extended Thinking:** https://anthropic.mintlify.app/en/docs/build-with-claude/extended-thinking
 
-**If you encounter this issue:**
+---
 
-1. Verify reasoning is actually working using `zai-debug.js`:
-   ```
-   [CHUNK 1] 177 bytes [THINKING] → {role:"assistant", content:"", reasoning_content:"↵"}
-   [CHUNK 2] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"The"}
-   [CHUNK 3] 167 bytes [THINKING] → {role:"assistant", reasoning_content:" user"}
-   ```
-   The debug logs show whether the model is generating reasoning content.
+### Using CCR Built-in Transformers Only
 
-2. If reasoning chunks appear in logs but not in Claude Code, possible approaches:
-   - Check Claude Code Router documentation/issues for thinking block support
-   - Review CCR source code to confirm if thinking block transformation is implemented
-   - Consider forking Claude Code Router to implement custom stream reassembly
-   - Wait for potential future updates to CCR that may add this support
+**Problem:** You want to use Z.ai with Claude Code but don't want to use the custom transformer (`zai.js`).
+
+**Solution:** Use Claude Code Router's built-in transformers (`maxtoken`, `sampling`, `reasoning`) with model-specific configurations.
+
+**Configuration in `config.json`:**
+
+```json
+{
+  "LOG": false,
+  "LOG_LEVEL": "debug",
+  "HOST": "127.0.0.1",
+  "PORT": 3456,
+  "APIKEY": "",
+  "API_TIMEOUT_MS": "600000",
+  "PROXY_URL": "",
+  "CUSTOM_ROUTER_PATH": "",
+  "transformers": [],
+  "Providers": [
+    {
+      "name": "ZAI",
+      "api_base_url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "api_key": "YOUR_ZAI_API_KEY_HERE",
+      "models": [
+        "glm-4.6",
+        "glm-4.5",
+        "glm-4.5v",
+        "glm-4.5-air"
+      ],
+      "transformer": {
+        "use": [
+          ["maxtoken", {"max_tokens": 131072}],
+          ["sampling", {"temperature": 1.0, "top_p": 0.95}],
+          "reasoning"
+        ],
+        "glm-4.5": {
+          "use": [
+            ["maxtoken", {"max_tokens": 98304}],
+            ["sampling", {"temperature": 0.6, "top_p": 0.95}]
+          ]
+        },
+        "glm-4.5-air": {
+          "use": [
+            ["maxtoken", {"max_tokens": 98304}],
+            ["sampling", {"temperature": 0.6, "top_p": 0.95}]
+          ]
+        },
+        "glm-4.5v": {
+          "use": [
+            ["maxtoken", {"max_tokens": 16384}],
+            ["sampling", {"temperature": 0.6, "top_p": 0.95}]
+          ]
+        }
+      }
+    }
+  ],
+  "Router": {
+    "default": "ZAI,glm-4.6",
+    "background": "ZAI,glm-4.6",
+    "think": "ZAI,glm-4.6",
+    "longContext": "ZAI,glm-4.6",
+    "longContextThreshold": 204800,
+    "webSearch": "ZAI,glm-4.6",
+    "image": "ZAI,glm-4.5v"
+  }
+}
+```
+
+**What this configuration does:**
+
+- **Provider level** (applies to GLM 4.6 by default):
+  - `maxtoken`: Sets max output to 128K (131,072 tokens)
+  - `sampling`: Sets temperature to 1.0 and top_p to 0.95
+  - `reasoning`: Generates signatures for thinking blocks
+
+- **Model-specific overrides**:
+  - GLM 4.5 / 4.5-air: 96K output (98,304 tokens), temperature 0.6
+  - GLM 4.5v: 16K output (16,384 tokens), temperature 0.6
 
 ---
 
