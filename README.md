@@ -25,15 +25,18 @@
    - [Method 2: Using `ccr start` + `claude`](#method-2-using-ccr-start--claude)
    - [Method 3: Using `ccr start` + Visual Studio Code Extension](#method-3-using-ccr-start--visual-studio-code-extension)
    - [Bonus: JetBrains IDEs Extension](#bonus-jetbrains-ides-extension)
-   - [Understanding Reasoning Modes](#understanding-reasoning-modes)
+   - [Understanding Reasoning Hierarchy](#understanding-reasoning-hierarchy)
    - [Sampling Control (Temperature & Top-P)](#sampling-control-temperature--top-p)
 9. [Troubleshooting](#troubleshooting)
+   - [Quick Guide: Thinking/Reasoning Issues](#quick-guide-thinkingreasoning-issues)
    - [CCR Won't Start](#ccr-wont-start)
    - [Z.ai API Key Invalid](#zai-api-key-invalid)
    - [Thinking Not Working](#thinking-not-working)
-   - [Debug Logs Too Large](#debug-logs-too-large)
-   - [Connection Fails with Specific IP](#connection-fails-with-specific-ip)
    - [Claude Code Not Displaying Thinking](#claude-code-not-displaying-thinking)
+   - [Model Still Thinking Despite Disabling It](#model-still-thinking-despite-disabling-it)
+   - [Tools Not Working Correctly](#tools-not-working-correctly)
+   - [Debug Logs Accumulation](#debug-logs-accumulation)
+   - [Connection Fails with Specific IP](#connection-fails-with-specific-ip)
    - [Using CCR Built-in Transformers Only](#using-ccr-built-in-transformers-only)
 10. [Additional Resources](#additional-resources)
 
@@ -41,33 +44,20 @@
 
 ## Overview
 
-This guide explains how to configure **Claude Code** to work with **Z.ai's** OpenAI-Compatible Endpoint using **Claude Code Router (CCR)** with a custom transformer.
+This guide explains how to configure **Claude Code (CC)** to work with **Z.ai's** OpenAI-Compatible Endpoint using **Claude Code Router (CCR)** with a custom transformer.
 
 **Key Features:**
 
-- ✓ **Resolves Claude Code's token limitations** - Automatically applies correct `max_tokens` for each model
-  - Claude Code limits output to 32K/64K tokens
-  - Transformer sends correct limits: GLM 4.6 (128K), GLM 4.5 (96K), GLM 4.5-air (96K), GLM 4.5v (16K)
+- ✓ **Resolves Claude Code's token limitations** - Automatically applies correct `max_tokens` for each model (GLM 4.6: 128K, GLM 4.5: 96K, GLM 4.5v: 16K)
 - ✓ **Sampling control guaranteed** - Sets `do_sample=true` to ensure `temperature` and `top_p` always work
-  - Applies model-specific temperature and top_p values
-  - Guarantees consistent sampling behavior across all requests
-- ✓ **Native reasoning control** - Model decides when to use reasoning (when enabled)
-  - Can be toggled on/off via Claude Code CLI (Tab key or settings)
-  - When enabled, model intelligently decides when reasoning is needed
-- ✓ **Keyword detection for prompt enhancement** - Auto-detects keywords requiring analysis
-  - Keywords: analyze, calculate, count, explain, solve, etc.
-  - Adds reasoning instructions to prompt when keywords detected
-- ✓ **"Ultrathink" mode** - User-triggered reasoning
-  - Type "ultrathink" anywhere in your message (Claude Code highlights it with rainbow colors)
-  - Activates thinking + adds reasoning instructions to prompt
-  - Works independently of all configuration settings and global overrides
-- ✓ **Global Configuration Overrides** - Apply settings across ALL models
-  - Override max_tokens, temperature, top_p globally (replaces model defaults)
-  - Override reasoning and keyword detection behavior for all models
-  - Customize keyword list: add to defaults or replace entirely
-  - Perfect for consistent behavior across different models
-- ✓ **Cross-platform support** (Windows, macOS, Linux)
-- ✓ **Enhanced StatusLine** with Git integration
+- ✓ **Native reasoning control** - Transformer can pass control to Claude Code (Tab key / `alwaysThinkingEnabled` setting)
+- ✓ **Force Permanent Thinking mode** - Nuclear option: Forces thinking on EVERY message (ignores all other settings)
+- ✓ **User tags for manual control** - `<Thinking:On|Off>`, `<Effort:Low|Medium|High>` for precise per-message control
+- ✓ **Keyword detection** - Auto-detects analytical keywords (analyze, calculate, explain, etc.) and enhances prompts
+- ✓ **"Ultrathink" mode** - Type "ultrathink" anywhere in your message for maximum reasoning (highlighted in rainbow colors)
+- ✓ **Global Configuration Overrides** - Apply settings across ALL models (max_tokens, temperature, reasoning, keywords, etc.)
+- ✓ **Cross-platform support** - Windows, macOS, Linux
+- ✓ **Enhanced StatusLine** - Git integration with branch tracking and file changes
 
 ---
 
@@ -199,6 +189,10 @@ ccr version
     {
       "path": "C:\\Users\\<Your-Username>\\.claude-code-router\\plugins\\zai.js",
       "options": {}
+    },
+    {
+      "path": "C:\\Users\\<Your-Username>\\.claude-code-router\\plugins\\zai-debug.js",
+      "options": {}
     }
   ],
   "Providers": [
@@ -214,7 +208,7 @@ ccr version
       ],
       "transformer": {
         "use": [
-          "zai",
+          "zai",       // ← Change to "zai-debug" to enable debug logging
           "reasoning" // ← Converts OpenAI's reasoning_content to Anthropic's thinking format
                       // ← Generates signatures to display thinking in Claude Code
         ]
@@ -237,6 +231,10 @@ ccr version
 ```json
 "transformers": [
   {
+    "path": "/Users/<Your-Username>/.claude-code-router/plugins/zai.js",
+    "options": {}
+  },
+  {
     "path": "/Users/<Your-Username>/.claude-code-router/plugins/zai-debug.js",
     "options": {}
   }
@@ -248,17 +246,21 @@ ccr version
 ```json
 "transformers": [
   {
+    "path": "/home/<Your-Username>/.claude-code-router/plugins/zai.js",
+    "options": {}
+  },
+  {
     "path": "/home/<Your-Username>/.claude-code-router/plugins/zai-debug.js",
     "options": {}
   }
 ]
 ```
 
-**To use debug transformer (all platforms):**
+**To switch between transformers:**
 
-- **Windows:** `"path": "C:\\Users\\<Your-Username>\\.claude-code-router\\plugins\\zai-debug.js"`
-- **macOS:** `"path": "/Users/<Your-Username>/.claude-code-router/plugins/zai-debug.js"`
-- **Linux:** `"path": "/home/<Your-Username>/.claude-code-router/plugins/zai-debug.js"`
+Simply change the `"use"` value in the provider configuration:
+- Use `"zai"` for production (no logging)
+- Use `"zai-debug"` for debugging (with detailed logs)
 
 **Important Notes:**
 
@@ -300,6 +302,8 @@ ccr version
    - When `APIKEY` is empty, `ANTHROPIC_AUTH_TOKEN` can have ANY value (but MUST be present)
    - Claude Code Router only accepts connections from localhost (127.0.0.1)
    - Claude Code Router will display `⚠️ API key is not set. HOST is forced to 127.0.0.1.`
+   
+   **Reference:** This behavior is implemented in `src/index.ts` and `src/middleware/auth.ts` - https://github.com/musistudio/claude-code-router
    
    #### 2.2 For Network Access (LAN or WAN)
 
@@ -417,15 +421,16 @@ The transformer supports optional configuration parameters in the `"options"` ob
 
 **Available Options:**
 
-| Option                     | Type      | Default | Description                                                                                                              |
-|----------------------------|-----------|---------|--------------------------------------------------------------------------------------------------------------------------|
-| `overrideMaxTokens`        | `number`  | `null`  | Apply max_tokens for ALL models (replaces model defaults)                                                                |
-| `overrideTemperature`      | `number`  | `null`  | Apply temperature for ALL models (replaces model defaults)                                                               |
-| `overrideTopP`             | `number`  | `null`  | Apply top_p for ALL models (replaces model defaults)                                                                     |
-| `overrideReasoning`        | `boolean` | `null`  | Enable reasoning on/off for ALL models (replaces model defaults)                                                         |
-| `overrideKeywordDetection` | `boolean` | `null`  | Enable keyword detection on/off for ALL models (replaces model defaults)                                                 |
-| `customKeywords`           | `array`   | `[]`    | Additional keywords to trigger automatic reasoning enhancement                                                           |
-| `overrideKeywords`         | `boolean` | `false` | If `true`, ONLY `customKeywords` are used (default list ignored). If `false`, `customKeywords` are ADDED to default list |
+| Option                      | Type      | Default | Description                                                                                                              |
+|-----------------------------|-----------|---------|--------------------------------------------------------------------------------------------------------------------------|
+| `forcePermanentThinking`    | `boolean` | `false` | Level 0 - Maximum Priority. Nuclear option for forcing thinking permanently (see note 5 below). |
+| `overrideMaxTokens`         | `number`  | `null`  | Apply max_tokens for ALL models (replaces model defaults)                                                                |
+| `overrideTemperature`       | `number`  | `null`  | Apply temperature for ALL models (replaces model defaults)                                                               |
+| `overrideTopP`              | `number`  | `null`  | Apply top_p for ALL models (replaces model defaults)                                                                     |
+| `overrideReasoning`         | `boolean` | `null`  | Enable reasoning on/off for ALL models (replaces model defaults)                                                         |
+| `overrideKeywordDetection`  | `boolean` | `null`  | Enable keyword detection on/off for ALL models (replaces model defaults)                                                 |
+| `customKeywords`            | `array`   | `[]`    | Additional keywords to trigger automatic reasoning enhancement                                                           |
+| `overrideKeywords`          | `boolean` | `false` | If `true`, ONLY `customKeywords` are used (default list ignored). If `false`, `customKeywords` are ADDED to default list |
 
 **Important Notes:**
 
@@ -435,32 +440,38 @@ The transformer supports optional configuration parameters in the `"options"` ob
    - `overrideKeywords: true` → Replaces ALL default keywords with ONLY your custom keywords
 3. **Keyword Detection Requirements:** Custom keywords only work when BOTH `reasoning=true` AND `keywordDetection=true`
 4. **Null vs False:** Use `null` (omit the option) to use model defaults, use `false` to explicitly disable
+5. **forcePermanentThinking:** Forces `reasoning=true` + `effort=high` on EVERY message. Overrides ALL other settings (Ultrathink, User Tags, Global Overrides). User Tags like `<Thinking:Off>`, `<Effort:Low>`, `<Effort:Medium>` are completely ignored. Use ONLY when you want thinking 100% of the time. (Note: Inline user tags normally have HIGHER priority than global overrides, except when this option is active)
 
 **Examples:**
 
 ```json
-// Example 1: Apply lower temperature for ALL models
+// Example 1: Force thinking permanently (Nuclear Option)
+"options": {
+  "forcePermanentThinking": true
+}
+
+// Example 2: Apply lower temperature for ALL models
 "options": {
   "overrideTemperature": 0.5
 }
 
-// Example 2: Disable reasoning for ALL models
+// Example 3: Disable reasoning for ALL models
 "options": {
   "overrideReasoning": false
 }
 
-// Example 3: Add custom keywords to default list
+// Example 4: Add custom keywords to default list
 "options": {
   "customKeywords": ["blueprint", "strategy", "roadmap"]
 }
 
-// Example 4: Use ONLY custom keywords (ignore defaults)
+// Example 5: Use ONLY custom keywords (ignore defaults)
 "options": {
   "customKeywords": ["think", "analyze", "reason"],
   "overrideKeywords": true
 }
 
-// Example 5: Complete custom setup
+// Example 6: Complete custom setup
 "options": {
   "overrideMaxTokens": 90000,
   "overrideTemperature": 0.8,
@@ -499,7 +510,7 @@ The transformer supports optional configuration parameters in the `"options"` ob
   "enableAllProjectMcpServers": true,
   "statusLine": {
     "type": "command",
-    "command": "pwsh -NoProfile -ExecutionPolicy Bypass -Command \"& { . \\\"C:\\Users\\$env:USERNAME\\.claude\\statusline.ps1\\\" }\""
+    "command": "pwsh -NoProfile -ExecutionPolicy Bypass -Command \"& { $p = Join-Path $env:USERPROFILE '.claude\\statusline.ps1'; & $p }\""
   },
   "alwaysThinkingEnabled": true
 }
@@ -521,38 +532,137 @@ The transformer supports optional configuration parameters in the `"options"` ob
 chmod +x ~/.claude/statusline.sh
 ```
 
+For the complete code, see the [StatusLine Scripts](#statusline-scripts) section.
+
 ---
 
 ## Transformer Files
 
-### Production Transformer
+This project includes two transformer versions. You can install both and choose which one to use per model.
+
+### Production Transformer (zai.js)
 
 **[→ View zai.js](zai.js)**
 
-**Installation Location:**
+**Transformer name:** `zai`
 
+**Purpose:** Optimized for production use. Use when you want maximum performance and don't need logging overhead.
+
+**Features:**
+- Optimized for production use
+- No logging overhead
+- Minimal memory footprint
+- All reasoning features included (keywords, User Tags, Ultrathink, 6-level hierarchy with priorities 0-5)
+
+**When to use this transformer:**
+- ✓ Production models where performance matters
+- ✓ Everything is working correctly and you don't need logs
+- ✓ You want the smallest memory footprint
+- ✓ Stable models that don't require troubleshooting
+
+**Installation Location:**
 - **Windows:** `%USERPROFILE%\.claude-code-router\plugins\zai.js`
 - **macOS/Linux:** `~/.claude-code-router/plugins/zai.js`
 
 ---
 
-### Debug Transformer
+### Debug Transformer (zai-debug.js)
 
 **[→ View zai-debug.js](zai-debug.js)**
 
-**Installation Location:**
+**Transformer name:** `zai-debug`
 
+**Purpose:** Troubleshooting and debugging transformer. Use when you need to understand what's happening inside the reasoning system or diagnose problems with model behavior.
+
+**Features:**
+- Complete logging to `~/.claude-code-router/logs/zai-transformer-[timestamp].log`
+- Automatic log rotation at 10 MB
+- Records all decisions, transformations, and reasoning detection
+- Shows request/response flow with detailed annotations
+- Tracking of keyword detection, Ultrathink mode, and prompt enhancements
+- Helps diagnose: why reasoning isn't triggering, tool calling issues, configuration problems
+
+**When to use this transformer:**
+- ✓ Model not entering think mode when expected
+- ✓ Debugging keyword detection (is my keyword being recognized?)
+- ✓ Investigating Ultrathink behavior
+- ✓ Verifying User Tags are working (`<Thinking:On>`, `<Effort:High>`)
+- ✓ Checking if global config overrides are applied correctly
+- ✓ Analyzing why certain prompts behave differently
+- ✓ Preparing detailed logs for bug reports or support
+
+**Installation Location:**
 - **Windows:** `%USERPROFILE%\.claude-code-router\plugins\zai-debug.js`
 - **macOS/Linux:** `~/.claude-code-router/plugins/zai-debug.js`
 
-**Key Differences from Production:**
+---
 
-- ✓ Complete logging to `~/.claude-code-router/logs/zai-transformer-[timestamp].log`
-- ✓ Automatic log rotation when file reaches 10 MB
-- ✓ Records all decisions, transformations, and reasoning detection
-- ✓ Shows request/response flow with detailed annotations
-- ✓ Detailed request/response inspection with formatted JSON
-- ✓ Tracking of keyword detection, ultrathink mode, and prompt enhancements
+### Using Both Transformers Simultaneously
+
+You can install both transformers and call them individually per model. This allows you to:
+
+- **Use production transformer (`zai`)** for models you trust and want maximum performance
+- **Use debug transformer (`zai-debug`)** for models where you're troubleshooting issues, testing new configurations, or need detailed logs
+
+**When to use `zai` (production):**
+- ✓ Stable models in production environment
+- ✓ Performance is critical
+- ✓ You don't need logging overhead
+- ✓ Everything works as expected
+
+**When to use `zai-debug` (debug):**
+- ✓ Troubleshooting reasoning issues (why model isn't using think mode)
+- ✓ Debugging tool calling problems (tools not being invoked correctly)
+- ✓ Testing new keyword detection or Ultrathink mode
+- ✓ Investigating unexpected model behavior
+- ✓ Analyzing request/response transformations
+- ✓ Verifying configuration changes are working
+- ✓ Log files needed for issue reporting
+
+**Configuration example:**
+
+```json
+{
+  "transformers": [
+    {
+      "path": "C:\\Users\\<Your-Username>\\.claude-code-router\\plugins\\zai.js",
+      "options": {}
+    },
+    {
+      "path": "C:\\Users\\<Your-Username>\\.claude-code-router\\plugins\\zai-debug.js",
+      "options": {}
+    }
+  ],
+  "Providers": [
+    {
+      "name": "ZAI",
+      "transformer": {
+        "glm-4.6": {
+          "use": [
+            "zai",           // ← Uses production transformer (no logging)
+            "reasoning"
+          ]
+        },
+        "glm-4.5": {
+          "use": [
+            "zai-debug",     // ← Uses debug transformer (with logging)
+            "reasoning"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+**Important:** The transformer name in `"use"` must match the `name` property in the transformer class:
+- `zai.js` exports `name = "zai"`
+- `zai-debug.js` exports `name = "zai-debug"`
+
+**Typical setup strategies:**
+1. **Performance-first:** Use `"zai"` on all models except when actively debugging
+2. **Debug-first:** Use `"zai-debug"` on experimental models, `"zai"` on proven ones
+3. **Hybrid:** Use `"zai-debug"` on one model for testing, `"zai"` on others for comparison
 
 **Log Structure Example:**
 
@@ -560,12 +670,11 @@ chmod +x ~/.claude/statusline.sh
 ❯ ccr start
 Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
 [START] Z.ai Transformer (Debug) initialized
-[CONFIG] ignoreSystemMessages: true
-[CONFIG] Log file: C:\Users\Bedolla\.claude-code-router\logs\zai-transformer-2025-10-30T20-30-05.log
+[CONFIG] Log file: C:\Users\Bedolla\.claude-code-router\logs\zai-transformer-2025-10-25T05-25-55.log
 [CONFIG] Maximum size per file: 10.0 MB
 
 ╔═══════════════════════════════════════════════════════════════════════════════════════════════════╗
-   [STAGE 1/3] INPUT: Claude Code CLI → CCR → transformRequestIn() [Request #1]
+   [STAGE 1/3] INPUT: Claude Code → CCR → transformRequestIn() [Request #1]
    Request RECEIVED from Claude Code, BEFORE sending to provider
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -579,7 +688,7 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
      "glm-4.5-air"
    ]
    transformer: [
-     "zai"
+     "zai-debug"
    ]
 
    [CONTEXT] HTTP request from client:
@@ -587,28 +696,41 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
 
    [INPUT] Request received from Claude Code:
    model: "glm-4.6"
-   max_tokens: 65537
+   max_tokens: 32769
    stream: true
    messages: 2 messages
-    [0] system: 12395 chars - "You are Claude Code, Anthropic's official CLI for ..."
-    [1] user: 650 chars - "<system-reminder> This is a reminder that your tod..."
-   tools: 55 tools
-    └─ [Task, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, ... +45 more]
+    [0] system: 14154 chars - "You are Claude Code, Anthropic's official CLI for ..."
+    [1] user: 3426 chars - "<system-reminder> This is a reminder that your tod..."
+   tools: 53 tools
+    └─ [Task, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, ... +43 more]
    tool_choice: undefined
    reasoning: {
      "effort": "high",
      "enabled": true
    }
 
-   [OVERRIDE] Original max_tokens: 65537 → Override to 131072
-   [TRANSLATION] Claude Code requests reasoning.enabled=true
-   [APPLIED] Effective reasoning=true (model supports)
+   [OVERRIDE] Original max_tokens: 32769 → Override to 131072
+
+   [CUSTOM TAGS] Searching for tags in user messages...
+   [SYSTEM] Message 1 ignored (system-reminder)
+   [INFO] No custom tags detected in messages
+
+   [REASONING] Determining effective configuration...
+   [PRIORITY 4] Model config: reasoning=true → reasoning=true, effort=high
+   [RESULT] Effective reasoning=true, effort level=high
+
+   [CLEANUP] Removing tags from messages...
+   [INFO] No tags found to remove
+
+   [REASONING FIELD] Adding reasoning field to request...
+   [INFO] Active conditions detected, overriding reasoning
+   reasoning.enabled = true
+   reasoning.effort = "high"
    [THINKING] Z.AI format applied
-   [LAST USER MESSAGE] "<system-reminder>↕This is a reminder that your todo list is currently ..."
-   [MESSAGE HASH] F60E417D (length: 509 chars)
-   [REASONING] Effective: true | KeywordDetection: true | Keywords: true
-   [ENHANCEMENT] ENHANCING PROMPT (effectiveReasoning + keywordDetection + keywords)
-   [ENHANCEMENT] Reasoning instructions added to prompt
+
+   [KEYWORDS] Checking for analytical keywords in ALL user messages...
+   [MESSAGE 1] system-reminder ignored
+   [RESULT] No keywords detected in any message
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝
 
 
@@ -625,23 +747,19 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
    do_sample: true
    stream: true
    messages: 2 messages
-    [0] system: 10667 chars - "You are Claude Code, Anthropic's official CLI for ..."
-    [1] user: 763 chars - "<system-reminder> This is a reminder that your tod..."
-   tools: 55 tools
-    └─ [Task, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, ... +45 more]
+    [0] system: 14154 chars - "You are Claude Code, Anthropic's official CLI for ..."
+    [1] user: 3426 chars - "<system-reminder> This is a reminder that your tod..."
+   tools: 53 tools
+    └─ [Task, Bash, Glob, Grep, ExitPlanMode, Read, Edit, Write, NotebookEdit, WebFetch, ... +43 more]
    tool_choice: undefined
    thinking: {
      "type": "enabled"
    }
    [EXTRAS]: reasoning
     └─ reasoning: {
-         "effort": "high",
-         "enabled": true
+         "enabled": true,
+         "effort": "high"
        }
-
-   [ENHANCEMENT] Last user message was ENHANCED:
-   Original: 509 chars → Enhanced: 763 chars (+254)
-   [Reasoning instructions added to prompt]
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝
 
 
@@ -649,6 +767,8 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
    [STAGE 3/3] LLM Provider → CCR → transformResponseOut() [Request #1]
    Response RECEIVED from provider, BEFORE sending to Claude Code
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+   [INFO] Response for Request #1 | Response Object ID: 1762148421903-3
 
    [RESPONSE OBJECT DETECTED]
    Response.ok: true
@@ -659,7 +779,6 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
 
    NOTE: This is the original Response BEFORE CCR parsing.
    CCR will read the stream and convert it to Anthropic format for Claude Code.
-
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝   
 
 ╔═══════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -669,28 +788,27 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
 
    [CHUNK 1] 177 bytes [THINKING] → {role:"assistant", content:"", reasoning_content:"↵"}
    [CHUNK 2] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"The"}
-   [CHUNK 3] 167 bytes [THINKING] → {role:"assistant", reasoning_content:" user"}
-   [CHUNK 4] 168 bytes [THINKING] → {role:"assistant", reasoning_content:" wants"}
-   [CHUNK 5] 165 bytes [THINKING] → {role:"assistant", reasoning_content:" me"}
-   [CHUNK 6] 335 bytes [THINKING] → {role:"assistant", reasoning_content:" to"}
-   [CHUNK 7] 173 bytes [THINKING] → {role:"assistant", reasoning_content:" JavaScript"}
-   [CHUNK 8] 334 bytes [THINKING] → {role:"assistant", reasoning_content:" files"}
-   [CHUNK 9] 167 bytes [THINKING] → {role:"assistant", reasoning_content:" find"}
-   [CHUNK 10] 167 bytes [THINKING] → {role:"assistant", reasoning_content:" bugs"}
-   [CHUNK 11] 163 bytes [THINKING] → {role:"assistant", reasoning_content:"."}
-   [CHUNK 12] 332 bytes [THINKING] → {role:"assistant", reasoning_content:" They"}
-   [CHUNK 13] 175 bytes [THINKING] → {role:"assistant", reasoning_content:" specifically"}
-   [CHUNK 14] 172 bytes [THINKING] → {role:"assistant", reasoning_content:" mentioned"}
-   [CHUNK 15] 165 bytes [THINKING] → {role:"assistant", reasoning_content:" ""}
-   [CHUNK 16] 163 bytes [THINKING] → {role:"assistant", reasoning_content:"U"}
-   [CHUNK 17] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"ltr"}
-   [CHUNK 18] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"ath"}
-   [CHUNK 19] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"ink"}
-   [CHUNK 20] 164 bytes [THINKING] → {role:"assistant", reasoning_content:"""}
+   [CHUNK 3] 335 bytes [THINKING] → {role:"assistant", reasoning_content:" user"}
+   [CHUNK 4] 165 bytes [THINKING] → {role:"assistant", reasoning_content:" me"}
+   [CHUNK 5] 165 bytes [THINKING] → {role:"assistant", reasoning_content:" to"}
+   [CHUNK 6] 170 bytes [THINKING] → {role:"assistant", reasoning_content:" analyze"}
+   [CHUNK 7] 166 bytes [THINKING] → {role:"assistant", reasoning_content:" the"}
+   [CHUNK 8] 333 bytes [THINKING] → {role:"assistant", reasoning_content:" code"}
+   [CHUNK 9] 334 bytes [THINKING] → {role:"assistant", reasoning_content:" find"}
+   [CHUNK 10] 163 bytes [THINKING] → {role:"assistant", reasoning_content:"."}
+   [CHUNK 11] 167 bytes [THINKING] → {role:"assistant", reasoning_content:" They"}
+   [CHUNK 12] 167 bytes [THINKING] → {role:"assistant", reasoning_content:" also"}
+   [CHUNK 13] 172 bytes [THINKING] → {role:"assistant", reasoning_content:" mentioned"}
+   [CHUNK 14] 165 bytes [THINKING] → {role:"assistant", reasoning_content:" ""}
+   [CHUNK 15] 328 bytes [THINKING] → {role:"assistant", reasoning_content:"U"}
+   [CHUNK 16] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"ath"}
+   [CHUNK 17] 165 bytes [THINKING] → {role:"assistant", reasoning_content:"ink"}
+   [CHUNK 18] 164 bytes [THINKING] → {role:"assistant", reasoning_content:"""}
+   [CHUNK 19] 336 bytes [THINKING] → {role:"assistant", reasoning_content:" which"}
+   [CHUNK 20] 165 bytes [THINKING] → {role:"assistant", reasoning_content:" be"}
    [STREAM] Limit of 20 chunks reached (more data exists)
 
    [SUCCESS] Reading completed - Original Response was NOT consumed
-
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -910,70 +1028,63 @@ If the extension shows "How do you want to log in" screen:
 | **ANTHROPIC_AUTH_TOKEN** | Auto-configured | Required               | Required                        |
 
 
-### Understanding Reasoning Modes
+### Understanding Reasoning Hierarchy
 
-The transformer provides **three levels of reasoning control**:
+The transformer implements a **6-level reasoning hierarchy** with clear priorities. Higher levels override lower levels.
 
-#### Level 1: Native Reasoning (Model-Decided)
+---
 
-When reasoning is enabled, the GLM models decide when to use their thinking capabilities.
+#### Level 0: Force Permanent Thinking (MAXIMUM PRIORITY - Nuclear Option)
 
-**How to enable:**
-- **Quick toggle:** Press `Tab` key during Claude Code session
-- **File setting:** Set `"alwaysThinkingEnabled": true` in `~/.claude/settings.json`
+**Configuration-based permanent override** - Set `forcePermanentThinking: true` in transformer options.
 
 **Behavior:**
-- Model intelligently decides when reasoning is needed
-- No prompt enhancement
-- Natural, model-controlled thinking
+- ✓ Forces `reasoning = true`  
+- ✓ Forces `effort = high`
+- ✓ Overrides **EVERYTHING** (Ultrathink, User Tags, Global Overrides, Model Config, Default)
+- ✓ No way to disable thinking once enabled (not even Ultrathink can override it)
+- ✗ User Tags like `<Thinking:Off>`, `<Effort:Low>`, `<Effort:Medium>` are **completely ignored**
+- ✗ No method can disable or reduce thinking when this option is active
 
-**Example:**
+**Configuration example:**
+
+```json
+"transformers": [
+  {
+    "path": "~/.claude-code-router/plugins/zai.js",
+    "options": {
+      "forcePermanentThinking": true  // ← Maximum priority, overrides ALL other settings
+    }
+  }
+]
 ```
-Write a function to sort an array.
-```
-Model may or may not use reasoning, depending on complexity.
+
+**When to use:**
+- Development/testing environments where you always want full reasoning traces
+- Research scenarios where consistent reasoning is required
+- Debugging complex problems where thinking should never be skipped
+
+**When NOT to use:**
+- Production environments (no flexibility)
+- When you need to toggle thinking on/off
+- When you want User Tags or Ultrathink to work
+- When you want control over reasoning behavior
+
+**Implementation:** Applied immediately in transformer logic, before any other checks.
 
 ---
 
-#### Level 2: Automatic Reasoning Enhancement (Keyword-Triggered)
-
-When you use specific keywords, the transformer enhances reasoning by optimizing your prompt.
-
-**Requirements:** This only works when **both** are true:
-- `reasoning=true` (model supports native reasoning)
-- `keywordDetection=true` (keyword detection enabled)
-
-If either is false, keywords are ignored (model behaves normally).
-
-**Keywords that trigger automatic reasoning enhancement:**
-- **Counting:** how many, count, number of, total
-- **Analysis:** analyze, reason, think, deduce, infer
-- **Calculations:** calculate, solve, determine
-- **Explanations:** explain, demonstrate, detail, step by step
-- **Identification:** identify, find, search, locate
-- **Comparisons:** compare, evaluate, verify, check
-
-**Example:**
-```
-Can you analyze this code and explain how it works?
-```
-
-The transformer will:
-1. Detect keywords "analyze" and "explain"
-2. Add reasoning instructions to your prompt
-3. Enable the model to use step-by-step thinking
-
----
-
-#### Level 3: UltraThink Mode
+#### Level 1: Ultrathink Mode (HIGHEST PRIORITY)
 
 **User-triggered via Claude Code CLI** - Type "ultrathink" anywhere in your message. Claude Code highlights this keyword with rainbow colors to indicate activation.
 
-**How it works:**
-1. You type "ultrathink" in your message (case-insensitive)
-2. Claude Code → CCR → Transformer detects the keyword
-3. Transformer activates thinking + adds reasoning instructions
-4. Works independently of all configuration settings and global overrides
+**Behavior:**
+- ✓ Forces `reasoning = true`
+- ✓ Forces `effort = high`
+- ✓ Adds reasoning instructions to prompt
+- ✓ Overrides ALL other settings (global overrides, model config, default, user tags)
+- ✓ Keyword is **kept in the message** (visible to the model)
+- ✗ Cannot override Force Permanent Thinking (Level 0)
 
 **Examples:**
 ```
@@ -985,6 +1096,199 @@ How many distinct letters are in "Mississippi"? Ultrathink
 ```
 Please ULTRATHINK this problem before answering.
 ```
+
+**Implementation:** The keyword is kept in the message (visible to the model).
+
+---
+
+#### Level 2: User Tags (HIGH PRIORITY)
+
+**Manual control via inline tags** - Add simple tags anywhere in your message to control reasoning behavior.
+
+**Available tags:**
+
+```
+<Thinking:On>    <!-- Enables reasoning -->
+<Thinking:Off>   <!-- Disables reasoning -->
+
+<Effort:Low>     <!-- Low effort -->
+<Effort:Medium>  <!-- Medium effort -->
+<Effort:High>    <!-- High effort -->
+```
+
+**Key points:**
+- Tags are **case insensitive** (`<Thinking:On>`, `<thinking:on>`, `<THINKING:ON>` are equivalent)
+- Tags are **inline and self-contained** (they don't wrap content)
+- Can be placed **anywhere** in your message (beginning, middle, or end)
+- Can be **combined** in any order
+- Are **removed from the message** before sending to the model (not visible to the model)
+
+**Examples:**
+
+```
+<Thinking:On> Analyze the performance of this sorting algorithm.
+```
+
+```
+Calculate the anagrams for "Mississippi" <Effort:High>
+```
+
+```
+<Effort:Low><Thinking:On> Quick summary of this code please.
+```
+
+```
+<Thinking:On> What's the time complexity? <Effort:Medium>
+```
+
+```
+Just give me a quick answer <Thinking:Off>
+```
+
+**Behavior:**
+- ✓ Overrides global configuration (Level 3)
+- ✓ Overrides model-specific config (Level 4)
+- ✓ Overrides default behavior (Level 5)
+- ✗ Cannot override Force Permanent Thinking (Level 0)
+- ✗ Cannot override Ultrathink (Level 1)
+
+**Tag Removal Behavior:**
+- **User Tags are removed**: `<Thinking:On>`, `<Thinking:Off>`, `<Effort:Low|Medium|High>` are stripped from the message before sending to the model
+- **Ultrathink keyword is kept**: The word "ultrathink" remains in the message and is visible to the model
+
+---
+
+#### Level 3: Global Configuration Override (MEDIUM PRIORITY)
+
+**Configuration in `config.json`** - Apply settings across ALL models.
+
+**Example:**
+```json
+"transformers": [
+  {
+    "path": "~/.claude-code-router/plugins/zai.js",
+    "options": {
+      "overrideReasoning": true,
+      "overrideKeywordDetection": true
+    }
+  }
+]
+```
+
+**Behavior:**
+- ✓ Overrides Model Config (Level 4)
+- ✗ Cannot override Force Permanent Thinking (Level 0)
+- ✗ Cannot override Ultrathink (Level 1)
+- ✗ Cannot override User Tags (Level 2)
+
+---
+
+#### Level 4: Model Configuration (LOW PRIORITY)
+
+**Per-model settings** - Configure reasoning per model in transformer code.
+
+**Default configurations for Z.AI GLM models:**
+```javascript
+modelConfigurations = {
+  "glm-4.6": { reasoning: true, keywordDetection: true },
+  "glm-4.5": { reasoning: true, keywordDetection: true },
+  "glm-4.5-air": { reasoning: true, keywordDetection: true },
+  "glm-4.5v": { reasoning: true, keywordDetection: true }
+}
+```
+
+**Behavior:**
+- ✗ Cannot override Force Permanent Thinking (Level 0)
+- ✗ Cannot override Ultrathink (Level 1)
+- ✗ Cannot override User Tags (Level 2)
+- ✗ Cannot override Global Configuration (Level 3)
+
+**Note:** With `reasoning: true` (default), the transformer always enables thinking. To allow Claude Code's native toggle to work, set `reasoning: false` for all models.
+
+---
+
+#### Level 5: Default (Native Control)
+
+**Passthrough mode** - Transformer passes control to Claude Code when no other levels are active.
+
+**Behavior:**
+- ✓ Transformer passes `request.reasoning` from Claude Code unchanged
+- ✓ Claude Code's Tab key works (toggle thinking on/off)
+- ✓ `alwaysThinkingEnabled` setting in `~/.claude/settings.json` works
+- ✓ Model decides when to use reasoning based on Claude Code's request
+- ✗ Cannot override Force Permanent Thinking (Level 0)
+- ✗ Cannot override Ultrathink (Level 1)
+- ✗ Cannot override User Tags (Level 2)
+- ✗ Cannot override Global Configuration (Level 3)
+- ✗ Cannot override Model Config (Level 4)
+
+**Important:** With default configuration (`reasoning: true` for all models), Level 4 is **always active**, so Level 5 is **never reached**. The transformer always controls reasoning, and Claude Code's native toggle does not work.
+
+**To enable Level 5 (Native Control):**
+
+Edit transformer code and set `reasoning: false` for all models:
+
+```javascript
+'glm-4.6': {
+  reasoning: false,  // ← Change from true to false
+  keywordDetection: true,
+  // ...
+}
+```
+
+**Trade-offs:**
+- ✓ Claude Code's Tab key and settings work
+- ✗ Lose automatic reasoning activation for keywords and Ultrathink
+- ✗ Lose User Tags control (`<Thinking:On>`, `<Effort:High>`)
+- ✗ Lose Global Override control
+
+---
+
+### Reasoning Hierarchy Priority Table
+
+**Note:** With default configuration (`reasoning: true` for all models), Level 4 is always active, preventing Level 5 from being reached. Claude Code's native toggle (Tab key / `alwaysThinkingEnabled` setting) does not have effect unless you set `reasoning: false` for all models.
+
+| Priority | Level | Source | Overrides | Can be overridden by | Active by Default? |
+|----------|-------|--------|-----------|----------------------|--------------------|
+| **0** (Maximum) | Force Permanent Thinking | `forcePermanentThinking: true` in options | All (1-5) | None (Nuclear Option - ignores all tags) | No |
+| **1** (Highest) | Ultrathink | Message keyword "ultrathink" | 2-5 | 0 | No (user-triggered) |
+| **2** | User Tags | `<Thinking:On\|Off>`, `<Effort:...>` | 3-5 | 0-1 | No (user-triggered) |
+| **3** | Global Override | `config.json` options | 4-5 | 0-2 | No (optional config) |
+| **4** | Model Config | Transformer code (`reasoning: true` by default) | 5 | 0-3 | **YES (always active)** |
+| **5** (Lowest) | Native Control | Claude Code's `request.reasoning` | None | 0-4 | **NO (unreachable by default)** |
+
+---
+
+### Keyword-Based Prompt Enhancement
+
+**Note:** This is NOT a priority level, but a feature that activates when conditions are met.
+
+**Activation requirements (ALL must be true):**
+1. ✓ `reasoning = true` (from any level 0-6)
+2. ✓ `keywordDetection = true` (from any level 0-6)
+3. ✓ Keywords detected in message text
+
+**When activated:** Transformer automatically enhances prompt with reasoning instructions.
+
+**Keywords that trigger enhancement (51 English keywords):**
+
+**Note:** The table below shows a summary of keyword categories. The complete list of 51 keywords is implemented in the transformer code (zai.js / zai-debug.js).
+
+| Category | Keywords |
+|----------|----------|
+| **Counting** | how many, count, number of, total, quantity |
+| **Analysis** | analyze, analyse, reason, think, deduce, infer, examine |
+| **Calculations** | calculate, solve, determine, compute |
+| **Explanations** | explain, demonstrate, detail, step by step, walk through |
+| **Identification** | identify, find, search, locate, discover |
+| **Comparisons** | compare, contrast, evaluate, assess, verify, check |
+
+**Example:**
+```
+Can you analyze this code and explain how it works?
+```
+
+Transformer detects "analyze" and "explain" → Adds reasoning instructions to prompt.
 
 ---
 
@@ -1002,79 +1306,67 @@ The transformer automatically ensures sampling parameters work correctly:
 
 ## Troubleshooting
 
-### CCR Won't Start
+### Quick Guide: Thinking/Reasoning Issues
 
-**Problem:** `ccr: command not found`
+**If you experience any problems with thinking or reasoning:**
 
-**Solution:**
+| Problem | See Section |
+|---------|-------------|
+| Model not thinking when expected | [Thinking Not Working](#thinking-not-working) |
+| Thinking blocks not visible in Claude Code | [Claude Code Not Displaying Thinking](#claude-code-not-displaying-thinking) |
+| Model keeps thinking despite disabling it | [Model Still Thinking Despite Disabling It](#model-still-thinking-despite-disabling-it) |
 
-```bash
-npm install -g @musistudio/claude-code-router
+**Common Solution for Mixed Transformer Issues:**
+
+If you're using both `zai` and `reasoning` transformers together and experiencing conflicts, use only `zai`:
+
+```json
+"transformer": {
+  "glm-4.6": {
+    "use": [
+      "zai"  // ← Only use the custom transformer (removes reasoning conflicts)
+    ]
+  }
+}
 ```
 
-Verify: `ccr version`
+**Result:** Everything works perfectly (reasoning control, keywords, Ultrathink, User Tags, all features).
 
----
+**Trade-off:** Thinking blocks won't display in Claude Code UI (but thinking still happens normally).
 
-### Z.ai API Key Invalid
-
-**Problem:** `401 Unauthorized` or `Invalid API Key`
-
-**Solution:**
-
-1. Verify API key at https://z.ai/manage-apikey/apikey-list
-2. Update `config.json` with correct key (`"api_key": "YOUR_ZAI_API_KEY_HERE"`)
-3. Restart CCR
+**Alternative:** If you must see thinking blocks displayed, use [CCR Built-in Transformers Only](#using-ccr-built-in-transformers-only) instead of custom transformers.
 
 ---
 
 ### Thinking Not Working
 
-**Problem:** Model isn't thinking/reasoning
+**Problem:** Model isn't thinking/reasoning when you expect it to.
 
-**Checklist:**
-    
-1. ✓ Using Z.ai OpenAI-compatible endpoint (`https://api.z.ai/api/coding/paas/v4/chat/completions`)
-2. ✓ `alwaysThinkingEnabled: true` in Claude Code settings
-3. ✓ Transformer is loaded (check CCR startup log)
-4. ✓ Try using `ultrathink` keyword to activate thinking
+**Common Causes & Solutions:**
 
----
+1. **Model has `reasoning: true` enabled (default)**
+   - With default configuration, reasoning is always active
+   - The transformer enables thinking automatically
+   - Solution: This is expected behavior. Reasoning should work by default.
 
-### Debug Logs Too Large
+2. **Using `overrideReasoning: false` in global options**
+   - Check `config.json` transformer options
+   - If `overrideReasoning: false` is set, reasoning is disabled globally
+   - Solution: Remove this option or set to `true`
 
-**Problem:** `zai-transformer-[timestamp].log` files growing too large
+3. **Transformer not loaded properly**
+   - Check CCR startup log for transformer loading confirmation
+   - Verify path in `config.json` points to correct transformer file
+   - Solution: Fix path and restart CCR
 
-**Solution:**
+4. **Using `<Thinking:Off>` tag**
+   - User Tags override model configuration
+   - Solution: Remove tag or use `<Thinking:On>`
 
-The debug transformer automatically rotates logs at 10 MB. To adjust:
-
-1. Edit `zai-debug.js`
-2. Find line: `this.maxLogSize = this.options.maxLogSize || 10 * 1024 * 1024;`
-3. Change `10` to desired MB limit (e.g., `5` for 5 MB)
-4. Restart CCR
-
----
-
-### Connection Fails with Specific IP
-
-**Problem:** Claude Code can't connect to CCR even though CCR is running
-
-**Cause:** CCR is bound to a specific IP address and Claude Code is trying to connect via `127.0.0.1`
-
-**Solution:**
-
-1. Check CCR's `config.json` for `HOST` and `PORT` values
-2. If `HOST` uses a specific IP (e.g., `"HOST": "10.10.10.10"`) and `"PORT": 3456`, update `ANTHROPIC_BASE_URL` to match:
-   ```json
-   "ANTHROPIC_BASE_URL": "http://10.10.10.10:3456"
-   ```
-3. **Never use** `127.0.0.1` in `ANTHROPIC_BASE_URL` if CCR is bound to a specific LAN IP
-4. Alternatively, set CCR's `HOST` to `"0.0.0.0"` to listen on all interfaces
-
-**Example:**
-- ✗ CCR: `"HOST": "10.10.10.10"` and `"PORT": 3456` + `"ANTHROPIC_BASE_URL": "http://127.0.0.1:3456"` → **Fails**
-- ✓ CCR: `"HOST": "10.10.10.10"` and `"PORT": 3456` + `"ANTHROPIC_BASE_URL": "http://10.10.10.10:3456"` → **Works**
+5. **Force activation methods:**
+   - Use `ultrathink` keyword in your message
+   - Use `<Thinking:On>` tag
+   - Use `<Effort:High>` tag
 
 ---
 
@@ -1113,14 +1405,295 @@ The debug transformer automatically rotates logs at 10 MB. To adjust:
 
 - Reads `reasoning_content` blocks from the provider's response
 - Auto-generates signatures (`signature = Date.now().toString()`)
+
+**Reference:** Source code at https://github.com/musistudio/llms/blob/main/src/transformer/reasoning.transformer.ts
 - Converts OpenAI format to Anthropic format with signatures
 - Enables Claude Code to display: `∴ Thought for 1s (ctrl+o to show thinking)`
 
 **Result:** Thinking blocks are now visible in Claude Code.
 
 **References:**
-- **ReasoningTransformer (source code):** https://github.com/musistudio/llms/blob/main/src/transformers/reasoning.transformer.ts
+- **ReasoningTransformer (source code):** https://github.com/musistudio/llms/blob/main/src/transformer/reasoning.transformer.ts
 - **Anthropic Extended Thinking:** https://anthropic.mintlify.app/en/docs/build-with-claude/extended-thinking
+
+---
+
+### Model Still Thinking Despite Disabling It
+
+**Problem:** You want to disable thinking but the model continues to use reasoning.
+
+**Most Common Cause:** Using CCR's built-in `reasoning` transformer alongside `zai`
+
+If you have this configuration:
+
+```json
+"transformer": {
+  "glm-4.6": {
+    "use": [
+      "zai",
+      "reasoning"  // ← This can override your reasoning settings
+    ]
+  }
+}
+```
+
+**What CCR's `reasoning` transformer does:**
+- Converts reasoning responses to display thinking blocks in Claude Code
+- **Side effect:** When `enable: true` (default), it forces `reasoning: { enabled: true }` on every request
+- This overrides the custom transformer's reasoning settings
+
+**Quick Solution:** Remove `"reasoning"` from the `use` array:
+
+```json
+"transformer": {
+  "glm-4.6": {
+    "use": [
+      "zai"  // ← Only use the custom transformer
+    ]
+  }
+}
+```
+
+**Result:**
+- ✓ All reasoning control works perfectly (Level hierarchy, keywords, Ultrathink, User Tags)
+- ✓ Model respects your reasoning settings correctly
+- ✗ You won't see thinking blocks displayed in Claude Code UI (but thinking still happens if enabled)
+
+---
+
+**Other Causes and Solutions:**
+
+**Root Cause:** The custom transformer (`zai.js` / `zai-debug.js`) has `reasoning: true` enabled by default for all GLM models:
+
+```javascript
+modelConfigurations = {
+  "glm-4.6": { reasoning: true, ... },
+  "glm-4.5": { reasoning: true, ... },
+  "glm-4.5-air": { reasoning: true, ... },
+  "glm-4.5v": { reasoning: true, ... }
+}
+```
+
+This makes the transformer **always control reasoning** (Level 4 always active), preventing Level 5 (Native Control) from being reached. Claude Code's native toggle (Tab key / `alwaysThinkingEnabled` setting) does not work.
+
+**Why Claude Code's toggle doesn't work:**
+
+When `reasoning: true` is set in model configuration (Level 4), the transformer always has "active conditions":
+
+```javascript
+const hasActiveConditions = ... || config.reasoning === true;  // Always true
+```
+
+This causes the transformer to **always control reasoning** and prevents Level 5 (Native Control) from activating. The transformer never passes `request.reasoning` from Claude Code to the model.
+
+**Alternative Solutions:**
+
+**Option 1: Use User Tags to disable thinking per message**
+
+Use `<Thinking:Off>` in your messages:
+
+```
+<Thinking:Off> Just give me a quick answer without deep reasoning
+```
+
+User Tags (Level 2) override Model Config (Level 4).
+
+**Option 2: Set global override to disable reasoning**
+
+In `config.json`, add `overrideReasoning: false`:
+
+```json
+"transformers": [
+  {
+    "path": "~/.claude-code-router/plugins/zai.js",
+    "options": {
+      "overrideReasoning": false  // ← Disables reasoning for ALL models
+    }
+  }
+]
+```
+
+Global Override (Level 3) takes precedence over Model Config (Level 4).
+
+**Option 3: Modify transformer code to enable Level 5 (Native Control)**
+
+Edit `zai.js` and change all models to `reasoning: false`:
+
+```javascript
+'glm-4.6': {
+  reasoning: false,  // ← Change from true to false
+  // ...
+}
+```
+
+**Result:** Level 4 becomes inactive, allowing Level 5 (Native Control) to activate. Claude Code's Tab key and `alwaysThinkingEnabled` setting will work.
+
+**Trade-offs:**
+- ✓ Claude Code's native toggle works
+- ✗ Lose automatic reasoning activation for keywords and Ultrathink mode
+- ✗ Lose User Tags control (`<Thinking:On>`, `<Effort:High>`)
+- ✗ Lose Global Override control
+
+**Note:** The model can still think/reason internally based on your settings. You just won't see the visual thinking blocks in the Claude Code interface.
+
+---
+
+### CCR Won't Start
+
+**Problem:** `ccr: command not found`
+
+**Solution:**
+
+```bash
+npm install -g @musistudio/claude-code-router
+```
+
+Verify: `ccr version`
+
+---
+
+### Z.ai API Key Invalid
+
+**Problem:** `401 Unauthorized` or `Invalid API Key`
+
+**Solution:**
+
+1. Verify API key at https://z.ai/manage-apikey/apikey-list
+2. Update `config.json` with correct key (`"api_key": "YOUR_ZAI_API_KEY_HERE"`)
+3. Restart CCR
+
+---
+
+### Tools Not Working Correctly
+
+**Problem:** Model doesn't call tools when it should, gets stuck in tool-calling loops, or generates "invalid JSON" errors in tool arguments.
+
+**Root Causes:**
+1. Model doesn't understand when to use tools
+2. Model doesn't know how to exit tool mode
+3. Model generates malformed JSON for tool arguments
+4. Streaming responses fragment tool call data
+
+**Solution:** Use CCR's built-in `tooluse` and `enhancetool` transformers.
+
+#### What These Transformers Do
+
+**`tooluse` (Tool Mode Manager):**
+- **Problem it solves:** Models sometimes don't call tools when they should, or get stuck in infinite tool-calling loops.
+- **Solution:** Injects system instructions for tool mode, forces the model to call a tool (`tool_choice: required`), and automatically adds a special `ExitTool` that allows the model to exit tool mode when it completes its task.
+
+**`enhancetool` (JSON Argument Fixer):**
+- **Problem it solves:** Models sometimes generate malformed JSON in tool arguments (missing quotes, extra commas, etc.), causing parsing errors.
+- **Solution:** Implements a 3-level cascade parsing system:
+  1. **Standard JSON:** Tries normal parsing
+  2. **JSON5:** If it fails, uses JSON5 which tolerates relaxed syntax (trailing commas, comments, etc.)
+  3. **jsonrepair:** If it still fails, attempts to automatically repair JSON (adds missing quotes, fixes structures, etc.)
+
+#### Configuration Example
+
+**Add to your `config.json`:**
+
+```json
+{
+  "Providers": [
+    {
+      "name": "ZAI",
+      "transformer": {
+        "glm-4.6": {
+          "use": [
+            "zai",          // ← The custom transformer
+            "reasoning",
+            "tooluse",      // ← Manages tool mode lifecycle
+            "enhancetool"   // ← Parses tool arguments robustly
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+**Order matters:** `tooluse` should come before `enhancetool`.
+
+#### Important Notes
+
+1. **`ExitTool` depends on the model:** The effectiveness of `tooluse` depends on the model correctly understanding and using `ExitTool`. Most models handle this well, but some may occasionally fail to invoke it or invoke it prematurely.
+
+2. **`tool_choice: required` forces calls:** The `tooluse` transformer forces the model to call a tool. This is crucial for tool mode but could lead to unexpected behavior if the model struggles to find a suitable tool.
+
+3. **Parsing fallback:** While `enhancetool` is very robust, extremely malformed arguments might still fail. In such cases, the system logs an error and returns an empty JSON object as fallback.
+
+4. **Universal compatibility:** These transformers work with any OpenAI-compatible provider (Z.AI, nVidia, OpenRouter, etc.).
+
+#### When to Use These Transformers
+
+Use these transformers when:
+- Model doesn't call tools when it should
+- Model gets stuck in infinite tool-calling loops
+- You see "invalid JSON in tool arguments" errors
+- Tool calls work inconsistently across different models
+- You want a guaranteed tool mode exit mechanism
+
+#### References
+
+- **CCR Repository:** https://github.com/musistudio/llms
+- **Source Code:** 
+  - `tooluse`: https://github.com/musistudio/llms/blob/main/src/transformer/tooluse.transformer.ts
+  - `enhancetool`: https://github.com/musistudio/llms/blob/main/src/transformer/enhancetool.transformer.ts
+
+---
+
+### Debug Logs Accumulation
+
+**Problem:** Multiple rotated log files accumulating in `~/.claude-code-router/logs/` directory
+
+**Cause:** The debug transformer automatically rotates logs when a file reaches 10 MB. Each session creates files named:
+- `zai-transformer-[timestamp].log` (current, up to 10 MB)
+- `zai-transformer-[timestamp]-part1.log` (rotated, 10 MB)
+- `zai-transformer-[timestamp]-part2.log` (rotated, 10 MB)
+- And so on...
+
+**Solutions:**
+
+**Option 1: Delete old logs manually**
+```bash
+# Windows (PowerShell)
+Remove-Item "$env:USERPROFILE\.claude-code-router\logs\zai-transformer-*.log"
+
+# macOS/Linux
+rm ~/.claude-code-router/logs/zai-transformer-*.log
+```
+
+**Option 2: Reduce rotation size (creates smaller files, but more frequently)**
+
+1. Edit `zai-debug.js`
+2. Find line: `this.maxLogSize = this.options.maxLogSize || 10 * 1024 * 1024;`
+3. Change `10` to desired MB limit (e.g., `5` for 5 MB)
+4. Restart CCR
+
+**Note:** Reducing the rotation size does NOT prevent accumulation, it only creates smaller files more frequently.
+
+---
+
+### Connection Fails with Specific IP
+
+**Problem:** Claude Code can't connect to CCR even though CCR is running
+
+**Cause:** CCR is bound to a specific IP address and Claude Code is trying to connect via `127.0.0.1`
+
+**Solution:**
+
+1. Check CCR's `config.json` for `HOST` and `PORT` values
+2. If `HOST` uses a specific IP (e.g., `"HOST": "10.10.10.10"`) and `"PORT": 3456`, update `ANTHROPIC_BASE_URL` to match:
+   ```json
+   "ANTHROPIC_BASE_URL": "http://10.10.10.10:3456"
+   ```
+3. **Never use** `127.0.0.1` in `ANTHROPIC_BASE_URL` if CCR is bound to a specific LAN IP
+4. Alternatively, set CCR's `HOST` to `"0.0.0.0"` to listen on all interfaces
+
+**Example:**
+- ✗ CCR: `"HOST": "10.10.10.10"` and `"PORT": 3456` + `"ANTHROPIC_BASE_URL": "http://127.0.0.1:3456"` → **Fails**
+- ✓ CCR: `"HOST": "10.10.10.10"` and `"PORT": 3456` + `"ANTHROPIC_BASE_URL": "http://10.10.10.10:3456"` → **Works**
 
 ---
 
@@ -1155,25 +1728,30 @@ The debug transformer automatically rotates logs at 10 MB. To adjust:
         "glm-4.5-air"
       ],
       "transformer": {
-        "use": [
-          ["maxtoken", {"max_tokens": 131072}],
-          ["sampling", {"temperature": 1.0, "top_p": 0.95}],
-          "reasoning"
-        ],
+        "glm-4.6": {
+          "use": [            
+            ["reasoning", {"enable": true}],
+            ["maxtoken", {"max_tokens": 131072}],
+            ["sampling", {"temperature": 1.0, "top_p": 0.95}],
+          ]
+        },
         "glm-4.5": {
           "use": [
+            ["reasoning", {"enable": true}],
             ["maxtoken", {"max_tokens": 98304}],
             ["sampling", {"temperature": 0.6, "top_p": 0.95}]
           ]
         },
         "glm-4.5-air": {
           "use": [
+            ["reasoning", {"enable": true}],
             ["maxtoken", {"max_tokens": 98304}],
             ["sampling", {"temperature": 0.6, "top_p": 0.95}]
           ]
         },
         "glm-4.5v": {
           "use": [
+            ["reasoning", {"enable": true}],
             ["maxtoken", {"max_tokens": 16384}],
             ["sampling", {"temperature": 0.6, "top_p": 0.95}]
           ]

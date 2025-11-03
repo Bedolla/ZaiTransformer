@@ -3,14 +3,14 @@
 // ============================================================================
 //
 // PURPOSE: Claude Code Router Transformer for Z.ai's OpenAI-Compatible Endpoint
-//          Solves Claude Code CLI limitations and enables advanced features.
+//          Solves Claude Code limitations and enables advanced features.
 //
-// FLOW: Claude Code CLI → This Transformer → Z.AI OpenAI-Compatible Endpoint
+// FLOW: Claude Code → This Transformer → Z.AI OpenAI-Compatible Endpoint
 //
 // KEY FEATURES:
 //
 // 1. MAX OUTPUT TOKENS FIX (Primary Solution)
-//    - Problem: Claude Code CLI limits max_tokens to 32K/64K
+//    - Problem: Claude Code limits max_tokens to 32K/64K
 //    - Solution: Transformer overrides to real model limits
 //      • GLM 4.6:     128K (131,072 tokens)
 //      • GLM 4.5:     96K  (98,304 tokens)
@@ -21,10 +21,11 @@
 //    - Sets do_sample=true to ensure temperature and top_p always work
 //    - Applies model-specific temperature and top_p values
 //
-// 3. NATIVE REASONING CONTROL (Model-Decided)
-//    - When reasoning=true: Model decides when to use reasoning
-//    - When reasoning=false: Reasoning completely disabled
-//    - Translation: Claude Code reasoning.enabled → Z.AI thinking.type
+// 3. REASONING CONTROL (Transformer-Managed)
+//    - With default config (reasoning=true), transformer always controls reasoning
+//    - Claude Code's native toggle (Tab key / alwaysThinkingEnabled) does NOT work
+//    - To enable Claude Code control: Set all models to reasoning=false
+//    - Translation: Transforms Claude Code reasoning → Z.AI thinking format
 //
 // 4. KEYWORD-BASED PROMPT ENHANCEMENT (Auto-Detection)
 //    - Detects analytical keywords: analyze, calculate, count, explain, etc.
@@ -32,7 +33,7 @@
 //    - REQUIRES: reasoning=true AND keywordDetection=true (both must be true)
 //    - If either is false, keywords are ignored
 //
-// 5. ULTRATHINK MODE (User-Triggered via Claude Code CLI)
+// 5. ULTRATHINK MODE (User-Triggered)
 //    - User types "ultrathink" anywhere in their message
 //    - Enables enhanced reasoning with prompt optimization
 //    - WORKS INDEPENDENTLY: Does NOT require reasoning or keywordDetection
@@ -48,14 +49,22 @@
 //    - overrideKeywordDetection: Override keyword detection globally
 //    - customKeywords: Add or replace keyword list
 //    - overrideKeywords: Use ONLY custom keywords (true) or add to defaults (false)
-//    - NOTE: Ultrathink works independently of global overrides
 //
-// REASONING HIERARCHY (4 Levels):
-//   Level 4: ultrathink keyword → Enhanced reasoning + prompt optimization
-//   Level 3: reasoning.enabled=false → Disable all reasoning
-//   Level 3: reasoning.enabled=true → Enable native reasoning
-//   Level 2: reasoning=true + keywordDetection=true + keywords → Auto prompt enhancement
-//   Level 1: reasoning=true → Native support (model decides)
+// 7. CUSTOM USER TAGS
+//    - Tags: <Thinking:On|Off>, <Effort:Low|Medium|High>
+//    - Direct control over reasoning without modifying configuration
+//
+// 8. FORCE PERMANENT THINKING (Level 0 - Maximum Priority)
+//    - Option: forcePermanentThinking (in transformer options)
+//    - Forces reasoning=true + effort=high on EVERY user message
+//    - Overrides ALL other settings (Ultrathink, User Tags, Global Overrides, Model Config, Default)
+//    - User Tags like <Thinking:Off>, <Effort:Low>, <Effort:Medium> are completely ignored
+//    - Nuclear option: Use only when you want thinking 100% of the time with no way to disable it
+//
+// HIERARCHY: Force Permanent Thinking (0) > Ultrathink (1) > Custom Tags (2) > Global Override (3) > Model Config (4) > Default (5)
+// NOTE: With default config (reasoning=true for all models), Level 4 is always active,
+//       making Claude Code's native toggle ineffective.
+// KEYWORDS: Requires reasoning=true + keywordDetection=true + keywords detected
 //
 // PRODUCTION: No debug logging, optimal performance
 //
@@ -191,8 +200,8 @@
  */
 
 /**
- * Reasoning effort level (OpenAI o1-style)
- * @typedef {"none"|"low"|"medium"|"high"} ThinkLevel
+ * Reasoning effort level (OpenAI o1 style)
+ * @typedef {"low"|"medium"|"high"} ThinkLevel
  */
 
 /**
@@ -326,6 +335,7 @@
 /**
  * Configuration options for transformer constructors
  * @typedef {Object} TransformerOptions
+ * @property {boolean} [forcePermanentThinking] - Force reasoning=true + effort=high on EVERY user message (Level 0 - Maximum Priority)
  * @property {number} [overrideMaxTokens] - Override max_tokens globally for all models
  * @property {number} [overrideTemperature] - Override temperature globally for all models
  * @property {number} [overrideTopP] - Override top_p globally for all models
@@ -374,6 +384,17 @@ class ZaiTransformer {
     this.defaultMaxTokens = 131072; // 128K default
 
     /**
+     * Force Permanent Thinking - MAXIMUM PRIORITY (Level 0)
+     * When enabled, forces reasoning=true + effort=high on EVERY user message.
+     * Overrides ALL other settings including Ultrathink, User Tags, and Global Overrides.
+     * 
+     * WARNING: This is the nuclear option. Use only when you want thinking 100% of the time.
+     * 
+     * @type {boolean}
+     */
+    this.forcePermanentThinking = this.options.forcePermanentThinking === true;
+
+    /**
      * Global overrides - Apply to ALL models when specified.
      * These have the highest priority and override model-specific settings.
      * 
@@ -388,20 +409,14 @@ class ZaiTransformer {
     };
 
     /**
-     * If true (recommended), only analyzes user messages for keywords.
-     * If false, analyzes user and system messages.
-     * @type {boolean}
-     * @default true
-     */
-    this.ignoreSystemMessages = true;
-
-    /**
      * Model configurations by provider.
      * Defines maxTokens, contextWindow, temperature, topP, reasoning, keywordDetection, provider.
      * @type {ModelConfigurationMap}
      */
     this.modelConfigurations = {
       // ===== Z.AI =====
+
+      // GLM 4.6 - Advanced reasoning with extended context
       'glm-4.6': {
         maxTokens: 128 * 1024,          // 131,072 (128K)
         contextWindow: 200 * 1024,      // 204,800 (200K)
@@ -411,6 +426,8 @@ class ZaiTransformer {
         keywordDetection: true,         // Enable automatic prompt enhancement when analytical keywords detected
         provider: 'Z.AI'
       },
+
+      // GLM 4.5 - General purpose with reasoning
       'glm-4.5': {
         maxTokens: 96 * 1024,           // 98,304 (96K)
         contextWindow: 128 * 1024,      // 131,072 (128K)
@@ -420,6 +437,8 @@ class ZaiTransformer {
         keywordDetection: true,         // Enable automatic prompt enhancement when analytical keywords detected
         provider: 'Z.AI'
       },
+
+      // GLM 4.5-air - Lightweight and fast version
       'glm-4.5-air': {
         maxTokens: 96 * 1024,           // 98,304 (96K)
         contextWindow: 128 * 1024,      // 131,072 (128K)
@@ -429,6 +448,8 @@ class ZaiTransformer {
         keywordDetection: true,         // Enable automatic prompt enhancement when analytical keywords detected
         provider: 'Z.AI'
       },
+
+      // GLM 4.5v - For vision and multimodal
       'glm-4.5v': {
         maxTokens: 16 * 1024,           // 16,384 (16K)
         contextWindow: 128 * 1024,      // 131,072 (128K)
@@ -552,10 +573,20 @@ class ZaiTransformer {
   /**
    * Enhances prompt by adding reasoning instructions
    * @param {string} content - Original prompt content
+   * @param {boolean} isUltrathink - If Ultrathink mode is active
    * @returns {string} Enhanced content with reasoning instructions
    */
-  modifyPromptForReasoning (content) {
-    const reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis. Think step by step and show your detailed reasoning before answering.]\n\n";
+  modifyPromptForReasoning (content, isUltrathink = false) {
+    let reasoningInstruction;
+
+    if (isUltrathink) {
+      // Ultrathink active: more intensive instructions with natural ULTRATHINK integration
+      reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis with ULTRATHINK mode engaged. Think step by step, analyze every aspect thoroughly, consider multiple perspectives, and show your detailed reasoning before answering.]\n\n";
+    } else {
+      // Normal mode: standard instructions
+      reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis. Think step by step and show your detailed reasoning before answering.]\n\n";
+    }
+
     return reasoningInstruction + content;
   }
 
@@ -580,31 +611,195 @@ class ZaiTransformer {
       max_tokens: this.globalOverrides.maxTokens || config.maxTokens
     };
 
-    // Determine effective reasoning setting
-    // Priority: Global Override > Claude Code > Model Config
-    const claudeCodeReasoning = request.reasoning?.enabled;
-    let effectiveReasoning;
+    // Detect custom tags in user messages
+    // Priority: Force Permanent Thinking (0) > Ultrathink (1) > User Tags (2) > Global Override (3) > Model Config (4) > Claude Code (5)
+    let ultrathinkDetected = false;
+    let thinkingTag = null; // 'On', 'Off'
+    let effortTag = null; // 'Low', 'Medium', 'High'
 
-    // Check if global override is set (highest priority)
-    if (this.globalOverrides.reasoning !== null) {
-      // Global override takes precedence over Claude Code and model config
-      effectiveReasoning = this.globalOverrides.reasoning;
-    } else if (claudeCodeReasoning === true) {
-      // Claude Code wants reasoning ON (only if model supports it)
-      effectiveReasoning = config.reasoning;
-    } else if (claudeCodeReasoning === false) {
-      // Claude Code wants reasoning OFF
-      effectiveReasoning = false;
-    } else {
-      // Claude Code didn't specify, use model default
-      effectiveReasoning = config.reasoning;
+    // Search for tags in ALL user messages (most recent takes precedence)
+    if (request.messages && Array.isArray(request.messages)) {
+      for (let i = 0; i < request.messages.length; i++) {
+        const message = request.messages[i];
+        if (message.role === 'user') {
+          let messageText = '';
+          if (typeof message.content === 'string') {
+            messageText = message.content;
+          } else if (Array.isArray(message.content)) {
+            messageText = message.content
+              .filter(c => c.type === 'text' && c.text)
+              .map(c => c.text)
+              .join(' ');
+          }
+
+          // Skip system-reminders
+          if (messageText.trim().startsWith('<system-reminder>')) {
+            continue;
+          }
+
+          // Detect Ultrathink (case insensitive) - NOTE: Keep in message for English version
+          if (/\bultrathink\b/i.test(messageText)) {
+            ultrathinkDetected = true;
+          }
+
+          // Detect Thinking tags (English only)
+          const thinkingMatch = messageText.match(/<Thinking:(On|Off)>/i);
+          if (thinkingMatch) {
+            thinkingTag = thinkingMatch[1]; // Capture: On, Off
+          }
+
+          // Detect Effort tags (English only)
+          const effortMatch = messageText.match(/<Effort:(Low|Medium|High)>/i);
+          if (effortMatch) {
+            effortTag = effortMatch[1]; // Capture: Low, Medium, High
+          }
+        }
+      }
     }
 
-    // Apply thinking format if reasoning is enabled
-    if (effectiveReasoning) {
-      const providerName = config.provider;
-      if (this.reasoningFormatters[providerName]) {
-        this.reasoningFormatters[providerName](modifiedRequest, modelName);
+    // Determine effective reasoning based on priority
+    let effectiveReasoning = false;
+    let effortLevel = "high"; // Default
+
+    // 0. Force Permanent Thinking (MAXIMUM PRIORITY - Nuclear Option)
+    if (this.forcePermanentThinking) {
+      effectiveReasoning = true;
+      effortLevel = "high";
+    }
+    // 1. Ultrathink (highest priority, overrides EVERYTHING except forcePermanentThinking)
+    else if (ultrathinkDetected) {
+      effectiveReasoning = true;
+      effortLevel = "high";
+    }
+    // 2. User Tags
+    else if (thinkingTag || effortTag) {
+      // If there's a Thinking tag
+      if (thinkingTag) {
+        const thinkingLower = thinkingTag.toLowerCase();
+        if (thinkingLower === 'off') {
+          // Thinking explicitly OFF
+          // BUT: If effort tag present, assume reasoning wanted
+          effectiveReasoning = effortTag ? true : false;
+        } else if (thinkingLower === 'on') {
+          // Thinking explicitly ON
+          effectiveReasoning = true;
+        }
+      }
+      // If NO thinking tag but there IS effort tag, assume reasoning ON
+      else if (effortTag) {
+        effectiveReasoning = true;
+      }
+
+      // Map effort tag to standard values (if exists)
+      if (effortTag) {
+        const effortLower = effortTag.toLowerCase();
+        if (effortLower === 'low') {
+          effortLevel = "low";
+        } else if (effortLower === 'medium') {
+          effortLevel = "medium";
+        } else if (effortLower === 'high') {
+          effortLevel = "high";
+        }
+      }
+      // If thinking ON but no effort, use default "high"
+    }
+    // 3. Global Override
+    else if (this.globalOverrides.reasoning !== null) {
+      effectiveReasoning = this.globalOverrides.reasoning;
+      effortLevel = "high";
+    }
+    // 4. Model Config
+    else if (config.reasoning === true) {
+      effectiveReasoning = true;
+      effortLevel = "high";
+    }
+
+    // Remove tags from ALL user messages (English version: remove Effort and Thinking, KEEP Ultrathink)
+    if (request.messages && Array.isArray(request.messages)) {
+      let messagesModified = false;
+
+      for (let i = 0; i < request.messages.length; i++) {
+        const message = request.messages[i];
+        if (message.role === 'user') {
+          let textModified = false;
+
+          if (typeof message.content === 'string') {
+            let newText = message.content;
+
+            // Remove tags
+            newText = newText.replace(/<Effort:(Low|Medium|High)>/gi, '');
+            newText = newText.replace(/<Thinking:(On|Off)>/gi, '');
+
+            if (newText !== message.content) {
+              textModified = true;
+              if (!messagesModified) {
+                modifiedRequest.messages = [...request.messages];
+                messagesModified = true;
+              }
+              modifiedRequest.messages[i] = { ...message, content: newText.trim() };
+            }
+          } else if (Array.isArray(message.content)) {
+            const newContent = message.content.map(content => {
+              if (content.type === 'text' && content.text) {
+                let newText = content.text;
+
+                // Remove tags
+                newText = newText.replace(/<Effort:(Low|Medium|High)>/gi, '');
+                newText = newText.replace(/<Thinking:(On|Off)>/gi, '');
+
+                if (newText !== content.text) {
+                  textModified = true;
+                  return { ...content, text: newText.trim() };
+                }
+              }
+              return content;
+            });
+
+            if (textModified) {
+              if (!messagesModified) {
+                modifiedRequest.messages = [...request.messages];
+                messagesModified = true;
+              }
+              modifiedRequest.messages[i] = { ...message, content: newContent };
+            }
+          }
+        }
+      }
+    }
+
+    // Add reasoning field with effort level to request
+    // Only override if there's Ultrathink, user tags, global override, or config.reasoning
+    const hasActiveConditions = ultrathinkDetected || thinkingTag || effortTag || this.globalOverrides.reasoning !== null || config.reasoning === true;
+
+    if (hasActiveConditions) {
+      if (effectiveReasoning) {
+        modifiedRequest.reasoning = {
+          enabled: true,
+          effort: effortLevel
+        };
+
+        // Apply provider thinking format
+        const providerName = config.provider;
+        if (this.reasoningFormatters[providerName]) {
+          this.reasoningFormatters[providerName](modifiedRequest, modelName);
+        }
+      } else {
+        modifiedRequest.reasoning = {
+          enabled: false
+        };
+      }
+    } else {
+      // No active conditions: pass original reasoning from Claude Code if exists
+      if (request.reasoning) {
+        modifiedRequest.reasoning = request.reasoning;
+
+        // If original reasoning is enabled, apply provider format
+        if (request.reasoning.enabled === true) {
+          const providerName = config.provider;
+          if (this.reasoningFormatters[providerName]) {
+            this.reasoningFormatters[providerName](modifiedRequest, modelName);
+          }
+        }
       }
     }
 
@@ -628,19 +823,15 @@ class ZaiTransformer {
     modifiedRequest.do_sample = true;
 
     // Check if keywords are detected for prompt enhancement
-    let promptAlreadyEnhanced = false; // Track if prompt was enhanced to avoid duplication
-
+    // ONLY if reasoning is active AND keywordDetection is enabled
+    // Search in ALL valid messages, not just the last one
+    let keywordsDetectedInConversation = false;
     if (request.messages && Array.isArray(request.messages)) {
-      // Search for last user message (iterate backwards)
-      for (let i = request.messages.length - 1; i >= 0; i--) {
+      for (let i = 0; i < request.messages.length; i++) {
         const message = request.messages[i];
 
-        // Apply message filtering according to ignoreSystemMessages
-        const shouldProcess = this.ignoreSystemMessages
-          ? message.role === 'user'
-          : (message.role === 'user' || message.role === 'system');
-
-        if (shouldProcess) {
+        // Only analyze user messages for keywords
+        if (message.role === 'user') {
           // Extract text from message (can be string or array of contents)
           let messageText = '';
           if (typeof message.content === 'string') {
@@ -652,80 +843,80 @@ class ZaiTransformer {
               .join(' ');
           }
 
-          // Detect "ultrathink" keyword for enhanced reasoning activation
-          // This works independently of all configuration settings and global overrides
-          const containsUltraThink = messageText.toLowerCase().includes('ultrathink');
+          // Skip automatic Claude Code system-reminder messages
+          if (messageText.trim().startsWith('<system-reminder>')) {
+            continue; // Skip to next message
+          }
 
-          if (containsUltraThink) {
-            const providerName = config.provider;
-            const formatAlreadyApplied = (providerName === 'Z.AI' && modifiedRequest.thinking !== undefined);
+          // Detect analytical keywords in any valid message
+          if (this.detectReasoningNeeded(messageText)) {
+            keywordsDetectedInConversation = true;
+            break; // Already detected, no need to continue searching
+          }
+        }
+      }
+    }
 
-            // Apply provider thinking format if not already present
-            if (!formatAlreadyApplied) {
-              if (this.reasoningFormatters[providerName]) {
-                this.reasoningFormatters[providerName](modifiedRequest, modelName);
-              }
+    // Apply prompt enhancement if keywords were detected
+    if (request.messages && Array.isArray(request.messages) && keywordsDetectedInConversation) {
+      // Apply global override for keywordDetection if set
+      const finalKeywordDetection = this.globalOverrides.keywordDetection !== null
+        ? this.globalOverrides.keywordDetection
+        : config.keywordDetection;
+
+      // Only enhance prompt if reasoning is active AND detection enabled
+      if (effectiveReasoning && finalKeywordDetection) {
+        // Search for last user message to enhance its prompt
+        for (let i = request.messages.length - 1; i >= 0; i--) {
+          const message = request.messages[i];
+
+          // Enhancement always targets user messages only
+          if (message.role === 'user') {
+            // Extract text from message
+            let messageText = '';
+            if (typeof message.content === 'string') {
+              messageText = message.content;
+            } else if (Array.isArray(message.content)) {
+              messageText = message.content
+                .filter(c => c.type === 'text' && c.text)
+                .map(c => c.text)
+                .join(' ');
             }
 
-            // Add reasoning instructions to the user's prompt
+            // Skip system-reminders
+            if (messageText.trim().startsWith('<system-reminder>')) {
+              continue;
+            }
+
+            // Modify the prompt of the last valid message
             // Safety check: Ensure messages array exists before cloning
             if (!request.messages || !Array.isArray(request.messages)) {
               // Skip enhancement if messages array is invalid
               break;
             }
-            modifiedRequest.messages = [...request.messages];
+
+            // If we already modified messages to remove tags, use that copy
+            if (!modifiedRequest.messages) {
+              modifiedRequest.messages = [...request.messages];
+            }
             const modifiedMessage = { ...modifiedRequest.messages[i] };
 
             if (typeof modifiedMessage.content === 'string') {
-              modifiedMessage.content = this.modifyPromptForReasoning(modifiedMessage.content);
+              modifiedMessage.content = this.modifyPromptForReasoning(modifiedMessage.content, ultrathinkDetected);
             } else if (Array.isArray(modifiedMessage.content)) {
               modifiedMessage.content = modifiedMessage.content.map(content => {
                 if (content.type === 'text' && content.text) {
-                  return { ...content, text: this.modifyPromptForReasoning(content.text) };
+                  return { ...content, text: this.modifyPromptForReasoning(content.text, ultrathinkDetected) };
                 }
                 return content;
               });
             }
 
             modifiedRequest.messages[i] = modifiedMessage;
-            promptAlreadyEnhanced = true; // Mark prompt as enhanced
-          } else if (!promptAlreadyEnhanced) {
-            // Normal logic for other keywords (only if prompt not already enhanced by ultrathink)
-            const reasoningNeededByKeywords = this.detectReasoningNeeded(messageText);
 
-            // Apply global override for keywordDetection if set
-            const finalKeywordDetection = this.globalOverrides.keywordDetection !== null
-              ? this.globalOverrides.keywordDetection
-              : config.keywordDetection;
-
-            if (effectiveReasoning && finalKeywordDetection && reasoningNeededByKeywords) {
-              // Modify the prompt of the detected message
-              // Safety check: Ensure messages array exists before cloning
-              if (!request.messages || !Array.isArray(request.messages)) {
-                // Skip enhancement if messages array is invalid
-                break;
-              }
-              modifiedRequest.messages = [...request.messages];
-              const modifiedMessage = { ...modifiedRequest.messages[i] };
-
-              if (typeof modifiedMessage.content === 'string') {
-                modifiedMessage.content = this.modifyPromptForReasoning(modifiedMessage.content);
-              } else if (Array.isArray(modifiedMessage.content)) {
-                modifiedMessage.content = modifiedMessage.content.map(content => {
-                  if (content.type === 'text' && content.text) {
-                    return { ...content, text: this.modifyPromptForReasoning(content.text) };
-                  }
-                  return content;
-                });
-              }
-
-              modifiedRequest.messages[i] = modifiedMessage;
-              promptAlreadyEnhanced = true; // Mark prompt as enhanced
-            }
+            // Already modified the last valid message, exit loop
+            break;
           }
-
-          // Already processed the relevant message, exit loop
-          break;
         }
       }
     }

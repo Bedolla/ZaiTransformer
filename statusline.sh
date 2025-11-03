@@ -301,16 +301,11 @@ get_model_name() {
   # Apply title case (capitalize first letter of each word)
   name=$(echo "$name" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
   
-  # Apply specific corrections for known model names
-  name="${name//glm-4.6/GLM 4.6}"
+  # Apply specific corrections for known model names (ordered from most specific to most generic)
   name="${name//Glm-4.6/GLM 4.6}"
-  name="${name//glm-4.5-v/GLM 4.5 V}"
-  name="${name//Glm-4.5-V/GLM 4.5 V}"
-  name="${name//glm-4.5/GLM 4.5}"
-  name="${name//Glm-4.5/GLM 4.5}"
-  name="${name//glm-4.5-air/GLM 4.5 Air}"
   name="${name//Glm-4.5-Air/GLM 4.5 Air}"
-  name="${name//glm-4/GLM 4}"
+  name="${name//Glm-4.5-V/GLM 4.5 V}"
+  name="${name//Glm-4.5/GLM 4.5}"
   name="${name//Glm-4/GLM 4}"
   
   echo "$name"

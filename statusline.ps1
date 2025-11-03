@@ -372,17 +372,12 @@ class StatusLineRenderer {
     # Example: "glm-4.6" → "Glm-4.6", "claude-3.5-sonnet" → "Claude-3.5-Sonnet"
     $modelName = (Get-Culture).TextInfo.ToTitleCase($modelName.ToLower())
     
-    # Apply specific corrections for known model names
+    # Apply specific corrections for known model names (ordered from most specific to most generic)
     $modelName = $modelName.Replace("Glm-4.6", "GLM 4.6")
-    $modelName = $modelName.Replace("glm-4.6", "GLM 4.6")
-    $modelName = $modelName.Replace("Glm-4.5-V", "GLM 4.5 V")
-    $modelName = $modelName.Replace("glm-4.5-v", "GLM 4.5 V")
-    $modelName = $modelName.Replace("Glm-4.5", "GLM 4.5")
-    $modelName = $modelName.Replace("glm-4.5", "GLM 4.5")
-    $modelName = $modelName.Replace("glm-4.5-air", "GLM 4.5 Air")
     $modelName = $modelName.Replace("Glm-4.5-Air", "GLM 4.5 Air")
+    $modelName = $modelName.Replace("Glm-4.5-V", "GLM 4.5 V")
+    $modelName = $modelName.Replace("Glm-4.5", "GLM 4.5")
     $modelName = $modelName.Replace("Glm-4", "GLM 4")
-    $modelName = $modelName.Replace("glm-4", "GLM 4")
     
     return $modelName
   }
@@ -446,12 +441,12 @@ class StatusLineRenderer {
   [string] Render() {
     # Emojis with UTF-32 codes
     [string]$emojiFolder = [char]::ConvertFromUtf32(0x1F5C2)      # 🗂️
-    [string]$emojiLeaf = [char]::ConvertFromUtf32(0x1F343)         # 🍃
-    [string]$emojiPackage = [char]::ConvertFromUtf32(0x1F4E6)      # 📦
-    [string]$emojiRobot = [char]::ConvertFromUtf32(0x1F916)        # 🤖
+    [string]$emojiLeaf = [char]::ConvertFromUtf32(0x1F343)        # 🍃
+    [string]$emojiPackage = [char]::ConvertFromUtf32(0x1F4E6)     # 📦
+    [string]$emojiRobot = [char]::ConvertFromUtf32(0x1F916)       # 🤖
     [string]$emojiMoney = [char]::ConvertFromUtf32(0x1F4B5)       # 💵
-    [string]$emojiClock = [char]::ConvertFromUtf32(0x23F1)         # ⏱️
-    [string]$emojiPencil = [char]::ConvertFromUtf32(0x270F)         # ✏️
+    [string]$emojiClock = [char]::ConvertFromUtf32(0x23F1)        # ⏱️
+    [string]$emojiPencil = [char]::ConvertFromUtf32(0x270F)       # ✏️
 
     # Gather all components for display
     [string]$directoryPath = $this.GetDirectoryPath()
