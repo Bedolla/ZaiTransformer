@@ -53,6 +53,10 @@
 // 7. CUSTOM USER TAGS
 //    - Tags: <Thinking:On|Off>, <Effort:Low|Medium|High>
 //    - Direct control over reasoning without modifying configuration
+//    - IMPORTANT HIERARCHY: <Effort> has HIGHER priority than <Thinking:Off>
+//      • <Thinking:Off> alone → reasoning disabled
+//      • <Thinking:Off> + <Effort:High> → reasoning enabled (Effort overrides)
+//      • <Effort> alone → reasoning enabled
 //
 // 8. FORCE PERMANENT THINKING (Level 0 - Maximum Priority)
 //    - Option: forcePermanentThinking (in transformer options)
@@ -61,9 +65,11 @@
 //    - User Tags like <Thinking:Off>, <Effort:Low>, <Effort:Medium> are completely ignored
 //    - Nuclear option: Use only when you want thinking 100% of the time with no way to disable it
 //
-// HIERARCHY: Force Permanent Thinking (0) > Ultrathink (1) > Custom Tags (2) > Global Override (3) > Model Config (4) > Default (5)
-// NOTE: With default config (reasoning=true for all models), Level 4 is always active,
-//       making Claude Code's native toggle ineffective.
+// HIERARCHY: Force Permanent Thinking (0) > Ultrathink (1) > Custom Tags (2) > Global Override (3) > Model Config (4) > Claude Code (5)
+// NOTE: With default config (reasoning=true for all models), Level 4 applies model defaults.
+//       Level 5 (Claude Code's native toggle) only works when:
+//       - No user conditions (Levels 0-3) are active AND
+//       - Model has reasoning=false in configuration
 // KEYWORDS: Requires reasoning=true + keywordDetection=true + keywords detected
 //
 // PRODUCTION: No debug logging, optimal performance
@@ -186,8 +192,8 @@
  * @typedef {Object} UnifiedMessage
  * @property {"user"|"assistant"|"system"|"tool"} role - Message role in conversation
  * @property {string|null|MessageContent[]} content - Message content (string, null, or structured blocks)
- * @property {ToolCall[]} [tool_calls] - Tool/function calls made by assistant
- * @property {string} [tool_call_id] - ID of tool call this message is responding to (for role="tool")
+ * @property {ToolCall[]} [tool_calls] - Tool/function calls made by assistant (OpenAI format - reserved for future compatibility)
+ * @property {string} [tool_call_id] - ID of tool call this message is responding to for role="tool" (OpenAI format - reserved for future compatibility)
  * @property {CacheControl} [cache_control] - Cache control settings for this message
  * @property {ThinkingBlock} [thinking] - Reasoning/thinking content from model
  */
@@ -200,7 +206,7 @@
  */
 
 /**
- * Reasoning effort level (OpenAI o1 style)
+ * Reasoning effort level (OpenAI o1-style)
  * @typedef {"low"|"medium"|"high"} ThinkLevel
  */
 
@@ -571,6 +577,24 @@ class ZaiTransformer {
   }
 
   /**
+   * Extracts text content from a message (handles both string and array formats)
+   * @param {UnifiedMessage} message - Message to extract text from
+   * @returns {string} Extracted text or empty string
+   * @private
+   */
+  _extractMessageText (message) {
+    if (typeof message.content === 'string') {
+      return message.content;
+    } else if (Array.isArray(message.content)) {
+      return message.content
+        .filter(c => c.type === 'text' && c.text)
+        .map(c => c.text)
+        .join(' ');
+    }
+    return '';
+  }
+
+  /**
    * Enhances prompt by adding reasoning instructions
    * @param {string} content - Original prompt content
    * @param {boolean} isUltrathink - If Ultrathink mode is active
@@ -580,8 +604,8 @@ class ZaiTransformer {
     let reasoningInstruction;
 
     if (isUltrathink) {
-      // Ultrathink active: more intensive instructions with natural ULTRATHINK integration
-      reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis with ULTRATHINK mode engaged. Think step by step, analyze every aspect thoroughly, consider multiple perspectives, and show your detailed reasoning before answering.]\n\n";
+      // Ultrathink active: intensive instructions with explanation and memory warning
+      reasoningInstruction = "\n\n[IMPORTANT: ULTRATHINK mode activated. (ULTRATHINK is the user's keyword requesting exceptionally thorough analysis from you as an AI model.) This means: DO NOT rely on your memory or assumptions - read and analyze everything carefully as if seeing it for the first time. Break down the problem step by step showing your complete reasoning, analyze each aspect meticulously by reading the actual current content (things may have changed since you last saw them), consider multiple perspectives and alternative approaches, verify logic coherence at each stage, and present well-founded conclusions with maximum level of detail based on what you actually read, not what you remember.]\n\n";
     } else {
       // Normal mode: standard instructions
       reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis. Think step by step and show your detailed reasoning before answering.]\n\n";
@@ -606,9 +630,10 @@ class ZaiTransformer {
     // Apply max_tokens based on model configuration and global overrides
     // Claude Code has limitation of 32000/65537, we use actual model values
     // Global override has the highest priority
+    // Use nullish coalescing (??) to allow 0 as valid override value
     const modifiedRequest = {
       ...request,
-      max_tokens: this.globalOverrides.maxTokens || config.maxTokens
+      max_tokens: this.globalOverrides.maxTokens ?? config.maxTokens
     };
 
     // Detect custom tags in user messages
@@ -622,22 +647,14 @@ class ZaiTransformer {
       for (let i = 0; i < request.messages.length; i++) {
         const message = request.messages[i];
         if (message.role === 'user') {
-          let messageText = '';
-          if (typeof message.content === 'string') {
-            messageText = message.content;
-          } else if (Array.isArray(message.content)) {
-            messageText = message.content
-              .filter(c => c.type === 'text' && c.text)
-              .map(c => c.text)
-              .join(' ');
-          }
+          const messageText = this._extractMessageText(message);
 
           // Skip system-reminders
           if (messageText.trim().startsWith('<system-reminder>')) {
             continue;
           }
 
-          // Detect Ultrathink (case insensitive) - NOTE: Keep in message for English version
+          // Detect Ultrathink (case insensitive)
           if (/\bultrathink\b/i.test(messageText)) {
             ultrathinkDetected = true;
           }
@@ -678,8 +695,9 @@ class ZaiTransformer {
         const thinkingLower = thinkingTag.toLowerCase();
         if (thinkingLower === 'off') {
           // Thinking explicitly OFF
-          // BUT: If effort tag present, assume reasoning wanted
-          effectiveReasoning = effortTag ? true : false;
+          // HIERARCHY: Effort tag has HIGHER priority than Thinking:Off
+          // If effort tag present, it overrides Thinking:Off and enables reasoning
+          effectiveReasoning = !!effortTag;
         } else if (thinkingLower === 'on') {
           // Thinking explicitly ON
           effectiveReasoning = true;
@@ -714,7 +732,7 @@ class ZaiTransformer {
       effortLevel = "high";
     }
 
-    // Remove tags from ALL user messages (English version: remove Effort and Thinking, KEEP Ultrathink)
+    // Remove tags from ALL user messages
     if (request.messages && Array.isArray(request.messages)) {
       let messagesModified = false;
 
@@ -768,10 +786,29 @@ class ZaiTransformer {
     }
 
     // Add reasoning field with effort level to request
-    // Only override if there's Ultrathink, user tags, global override, or config.reasoning
-    const hasActiveConditions = ultrathinkDetected || thinkingTag || effortTag || this.globalOverrides.reasoning !== null || config.reasoning === true;
+    // Separate user-initiated conditions from model configuration
+    const hasUserConditions = this.forcePermanentThinking || ultrathinkDetected || thinkingTag || effortTag || this.globalOverrides.reasoning !== null;
 
-    if (hasActiveConditions) {
+    if (hasUserConditions) {
+      // User explicitly set reasoning (Levels 0-3): override everything
+      if (effectiveReasoning) {
+        modifiedRequest.reasoning = {
+          enabled: true,
+          effort: effortLevel
+        };
+
+        // Apply provider thinking format
+        const providerName = config.provider;
+        if (this.reasoningFormatters[providerName]) {
+          this.reasoningFormatters[providerName](modifiedRequest, modelName);
+        }
+      } else {
+        modifiedRequest.reasoning = {
+          enabled: false
+        };
+      }
+    } else if (config.reasoning === true) {
+      // No user conditions but model supports reasoning (Level 4): use model default
       if (effectiveReasoning) {
         modifiedRequest.reasoning = {
           enabled: true,
@@ -789,7 +826,7 @@ class ZaiTransformer {
         };
       }
     } else {
-      // No active conditions: pass original reasoning from Claude Code if exists
+      // No user conditions and model doesn't have reasoning config (Level 5): pass Claude Code's reasoning
       if (request.reasoning) {
         modifiedRequest.reasoning = request.reasoning;
 
@@ -833,15 +870,7 @@ class ZaiTransformer {
         // Only analyze user messages for keywords
         if (message.role === 'user') {
           // Extract text from message (can be string or array of contents)
-          let messageText = '';
-          if (typeof message.content === 'string') {
-            messageText = message.content;
-          } else if (Array.isArray(message.content)) {
-            messageText = message.content
-              .filter(c => c.type === 'text' && c.text)
-              .map(c => c.text)
-              .join(' ');
-          }
+          const messageText = this._extractMessageText(message);
 
           // Skip automatic Claude Code system-reminder messages
           if (messageText.trim().startsWith('<system-reminder>')) {
@@ -873,15 +902,7 @@ class ZaiTransformer {
           // Enhancement always targets user messages only
           if (message.role === 'user') {
             // Extract text from message
-            let messageText = '';
-            if (typeof message.content === 'string') {
-              messageText = message.content;
-            } else if (Array.isArray(message.content)) {
-              messageText = message.content
-                .filter(c => c.type === 'text' && c.text)
-                .map(c => c.text)
-                .join(' ');
-            }
+            const messageText = this._extractMessageText(message);
 
             // Skip system-reminders
             if (messageText.trim().startsWith('<system-reminder>')) {

@@ -15,8 +15,8 @@
    - [Advanced Configuration Options](#advanced-configuration-options)
    - [Claude Code Configuration](#claude-code-configuration)
 6. [Transformer Files](#transformer-files)
-   - [Production Transformer](#production-transformer)
-   - [Debug Transformer](#debug-transformer)
+   - [Production Transformer (zai.js)](#production-transformer-zaijs)
+   - [Debug Transformer (zai-debug.js)](#debug-transformer-zai-debugjs)
 7. [StatusLine Scripts](#statusline-scripts)
    - [PowerShell StatusLine (Windows)](#powershell-statusline-windows)
    - [Bash StatusLine (macOS/Linux)](#bash-statusline-macoslinux)
@@ -29,11 +29,13 @@
    - [Sampling Control (Temperature & Top-P)](#sampling-control-temperature--top-p)
 9. [Troubleshooting](#troubleshooting)
    - [Quick Guide: Thinking/Reasoning Issues](#quick-guide-thinkingreasoning-issues)
-   - [CCR Won't Start](#ccr-wont-start)
-   - [Z.ai API Key Invalid](#zai-api-key-invalid)
    - [Thinking Not Working](#thinking-not-working)
    - [Claude Code Not Displaying Thinking](#claude-code-not-displaying-thinking)
    - [Model Still Thinking Despite Disabling It](#model-still-thinking-despite-disabling-it)
+   - [`reasoning_content` Not Visible in Debug Logs](#reasoning_content-not-visible-in-debug-logs)
+   - [Empty Thinking Blocks in Claude Code UI](#empty-thinking-blocks-in-claude-code-ui)
+   - [CCR Won't Start](#ccr-wont-start)
+   - [Z.ai API Key Invalid](#zai-api-key-invalid)
    - [Tools Not Working Correctly](#tools-not-working-correctly)
    - [Debug Logs Accumulation](#debug-logs-accumulation)
    - [Connection Fails with Specific IP](#connection-fails-with-specific-ip)
@@ -208,7 +210,7 @@ ccr version
       ],
       "transformer": {
         "use": [
-          "zai",       // ← Change to "zai-debug" to enable debug logging
+          "zai",      // ← Change to "zai-debug" to enable debug logging
           "reasoning" // ← Converts OpenAI's reasoning_content to Anthropic's thinking format
                       // ← Generates signatures to display thinking in Claude Code
         ]
@@ -266,9 +268,11 @@ Simply change the `"use"` value in the provider configuration:
 
 1. **Replace `YOUR_ZAI_API_KEY_HERE`** with your actual Z.ai API key
 
-2. **Authentication & Network Access:**
+2. **Reasoning Control Issues:** If you experience problems with thinking/reasoning not working as expected, or want absolute control over all options (including `<Thinking:Off>`), see [Quick Guide: Thinking/Reasoning Issues](#quick-guide-thinkingreasoning-issues) for the solution.
 
-   #### 2.1 For Local Access
+3. **Authentication & Network Access:**
+
+   #### 3.1 For Local Access
    
    **Option A: Using `ccr code`**
    - No configuration needed - `APIKEY` can be empty
@@ -305,7 +309,7 @@ Simply change the `"use"` value in the provider configuration:
    
    **Reference:** This behavior is implemented in `src/index.ts` and `src/middleware/auth.ts` - https://github.com/musistudio/claude-code-router
    
-   #### 2.2 For Network Access (LAN or WAN)
+   #### 3.2 For Network Access (LAN or WAN)
 
    **Option A: Using `ccr start` + `claude`**
 
@@ -341,7 +345,7 @@ Simply change the `"use"` value in the provider configuration:
    - Access CCR from other computers
    - Expose via reverse proxy (IIS, Nginx, etc.)
 
-3. **Usage Scenarios:**
+4. **Usage Scenarios:**
    
    | Scenario                                  | APIKEY in CCR    | ANTHROPIC_AUTH_TOKEN | Works?    |
    |-------------------------------------------|------------------|----------------------|-----------|
@@ -357,7 +361,7 @@ Simply change the `"use"` value in the provider configuration:
    
    *Note: VS Code Extension may show "How do you want to log in" screen when APIKEY is configured. Click **"Anthropic Console"** button to bypass.
 
-4. **Connection Configuration:**
+5. **Connection Configuration:**
    - The `HOST` and `PORT` in CCR's `config.json` **must match EXACTLY** the `ANTHROPIC_BASE_URL` in Claude Code's `settings.json` or your OS environment variables.
    - **Important:** When CCR is configured with a specific IP in HOST (e.g., `"HOST": "10.10.10.10"`), the server will ONLY listen on that exact IP address.
      - **What this means:** CCR will NOT respond to requests sent to `127.0.0.1` or `localhost`, even if Claude Code is running on the same computer.
@@ -377,14 +381,15 @@ Simply change the `"use"` value in the provider configuration:
    | `"HOST": "10.10.10.10"` | `"ANTHROPIC_BASE_URL": "http://10.10.10.10:3456"` | ✓ Yes                                     |
    | `"HOST": "10.10.10.10"` | `"ANTHROPIC_BASE_URL": "http://127.0.0.1:3456"`   | ✗ No (CCR not listening on 127.0.0.1)     |
 
-5. **`"LOG": false`** - CCR's own logging is disabled by default
+6. **`"LOG": false`** - CCR's own logging (default is `true`, but set to `false` in this example for better performance)
     - **Important:** The debug transformer (`zai-debug.js`) works independently and will still log to `~/.claude-code-router/logs/` even with `LOG: false`
     - CCR's logging is useful if you want to see raw response chunks from Z.ai, but it's separate from the transformer's debug logs
     - To enable CCR logs, set `"LOG": true` - logs will appear in CCR's console output
 
-6. **Transformer name matching:**
+7. **Transformer name matching:**
     - The value in `"use": ["zai"]` **MUST** match the `name` property in the transformer class
-    - Both transformer files define: `name = "zai"`
+    - `zai.js` exports `name = "zai"`
+    - `zai-debug.js` exports `name = "zai-debug"`
     - If you rename the transformer class's `name` property, you must update this value accordingly
 
 #### Advanced Configuration Options
@@ -421,22 +426,22 @@ The transformer supports optional configuration parameters in the `"options"` ob
 
 **Available Options:**
 
-| Option                      | Type      | Default | Description                                                                                                              |
-|-----------------------------|-----------|---------|--------------------------------------------------------------------------------------------------------------------------|
-| `forcePermanentThinking`    | `boolean` | `false` | Level 0 - Maximum Priority. Nuclear option for forcing thinking permanently (see note 5 below). |
-| `overrideMaxTokens`         | `number`  | `null`  | Apply max_tokens for ALL models (replaces model defaults)                                                                |
-| `overrideTemperature`       | `number`  | `null`  | Apply temperature for ALL models (replaces model defaults)                                                               |
-| `overrideTopP`              | `number`  | `null`  | Apply top_p for ALL models (replaces model defaults)                                                                     |
-| `overrideReasoning`         | `boolean` | `null`  | Enable reasoning on/off for ALL models (replaces model defaults)                                                         |
-| `overrideKeywordDetection`  | `boolean` | `null`  | Enable keyword detection on/off for ALL models (replaces model defaults)                                                 |
-| `customKeywords`            | `array`   | `[]`    | Additional keywords to trigger automatic reasoning enhancement                                                           |
-| `overrideKeywords`          | `boolean` | `false` | If `true`, ONLY `customKeywords` are used (default list ignored). If `false`, `customKeywords` are ADDED to default list |
+| Option                     | Type      | Default | Description                                                                                                              |
+|----------------------------|-----------|---------|--------------------------------------------------------------------------------------------------------------------------|
+| `forcePermanentThinking`   | `boolean` | `false` | Level 0 - Maximum Priority. Nuclear option for forcing thinking permanently (see note 5 below).                          |
+| `overrideMaxTokens`        | `number`  | `null`  | Apply max_tokens for ALL models (replaces model defaults)                                                                |
+| `overrideTemperature`      | `number`  | `null`  | Apply temperature for ALL models (replaces model defaults)                                                               |
+| `overrideTopP`             | `number`  | `null`  | Apply top_p for ALL models (replaces model defaults)                                                                     |
+| `overrideReasoning`        | `boolean` | `null`  | Enable reasoning on/off for ALL models (replaces model defaults)                                                         |
+| `overrideKeywordDetection` | `boolean` | `null`  | Enable keyword detection on/off for ALL models (replaces model defaults)                                                 |
+| `customKeywords`           | `array`   | `[]`    | Additional keywords to trigger automatic reasoning enhancement                                                           |
+| `overrideKeywords`         | `boolean` | `false` | If `true`, ONLY `customKeywords` are used (default list ignored). If `false`, `customKeywords` are ADDED to default list |
 
 **Important Notes:**
 
 1. **Global Overrides Priority:** When set, these options override ALL model-specific configurations
 2. **Custom Keywords Behavior:**
-   - `overrideKeywords: false` (default) → Adds custom keywords to the default list (~40 keywords)
+   - `overrideKeywords: false` (default) → Adds custom keywords to the default list (51 keywords)
    - `overrideKeywords: true` → Replaces ALL default keywords with ONLY your custom keywords
 3. **Keyword Detection Requirements:** Custom keywords only work when BOTH `reasoning=true` AND `keywordDetection=true`
 4. **Null vs False:** Use `null` (omit the option) to use model defaults, use `false` to explicitly disable
@@ -473,6 +478,7 @@ The transformer supports optional configuration parameters in the `"options"` ob
 
 // Example 6: Complete custom setup
 "options": {
+  "forcePermanentThinking": false,
   "overrideMaxTokens": 90000,
   "overrideTemperature": 0.8,
   "overrideTopP": 0.95,
@@ -521,9 +527,8 @@ The transformer supports optional configuration parameters in the `"options"` ob
 ```json
 "statusLine": {
   "type": "command",
-  "command": "~/.claude/statusline.sh",
+  "command": "~/.claude/statusline.sh"
 }
-
 ```
 
 **Don't forget to make the script executable:**
@@ -556,7 +561,7 @@ This project includes two transformer versions. You can install both and choose 
 
 **When to use this transformer:**
 - ✓ Production models where performance matters
-- ✓ Everything is working correctly and you don't need logs
+- ✓ Everything is working correctly, and you don't need logs
 - ✓ You want the smallest memory footprint
 - ✓ Stable models that don't require troubleshooting
 
@@ -812,6 +817,8 @@ Loaded JSON config from: C:\Users\Bedolla\.claude-code-router\config.json
 ╚═══════════════════════════════════════════════════════════════════════════════════════════════════╝
 ```
 
+**Note:** If you use the built-in `reasoning` transformer with `zai-debug.js`, you may not see `reasoning_content` in logs because the `reasoning` transformer processes and removes it first. See solution at: [`reasoning_content` Not Visible in Debug Logs](#reasoning_content-not-visible-in-debug-logs)
+
 ---
 
 ## StatusLine Scripts
@@ -940,7 +947,7 @@ claude
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:3456",
-    "ANTHROPIC_AUTH_TOKEN": "your-value-here"  // If APIKEY is set must match APIKEY in CCR config
+    "ANTHROPIC_AUTH_TOKEN": "your-value-here"  // If APIKEY is set, must match APIKEY in CCR config
   }
 }
 ```
@@ -1027,6 +1034,7 @@ If the extension shows "How do you want to log in" screen:
 | **Configuration**        | None needed     | Manual                 | Manual                          |
 | **ANTHROPIC_AUTH_TOKEN** | Auto-configured | Required               | Required                        |
 
+---
 
 ### Understanding Reasoning Hierarchy
 
@@ -1122,6 +1130,16 @@ Please ULTRATHINK this problem before answering.
 - Can be placed **anywhere** in your message (beginning, middle, or end)
 - Can be **combined** in any order
 - Are **removed from the message** before sending to the model (not visible to the model)
+
+**Important Hierarchy Within Level 2:**
+- `<Effort>` tags have **HIGHER priority** than `<Thinking:Off>`
+- If you combine `<Thinking:Off>` + any `<Effort>` tag, the Effort tag wins and reasoning is enabled
+- This allows fine-grained control: disable thinking by default but override with effort level
+- Examples of this hierarchy:
+  - `<Thinking:Off>` alone → reasoning disabled ✗
+  - `<Thinking:Off> <Effort:High>` together → reasoning enabled ✓ (Effort overrides Thinking:Off)
+  - `<Thinking:Off> <Effort:Low>` together → reasoning enabled ✓ (Effort overrides Thinking:Off)
+  - `<Effort:High>` alone → reasoning enabled ✓
 
 **Examples:**
 
@@ -1248,14 +1266,14 @@ Edit transformer code and set `reasoning: false` for all models:
 
 **Note:** With default configuration (`reasoning: true` for all models), Level 4 is always active, preventing Level 5 from being reached. Claude Code's native toggle (Tab key / `alwaysThinkingEnabled` setting) does not have effect unless you set `reasoning: false` for all models.
 
-| Priority | Level | Source | Overrides | Can be overridden by | Active by Default? |
-|----------|-------|--------|-----------|----------------------|--------------------|
-| **0** (Maximum) | Force Permanent Thinking | `forcePermanentThinking: true` in options | All (1-5) | None (Nuclear Option - ignores all tags) | No |
-| **1** (Highest) | Ultrathink | Message keyword "ultrathink" | 2-5 | 0 | No (user-triggered) |
-| **2** | User Tags | `<Thinking:On\|Off>`, `<Effort:...>` | 3-5 | 0-1 | No (user-triggered) |
-| **3** | Global Override | `config.json` options | 4-5 | 0-2 | No (optional config) |
-| **4** | Model Config | Transformer code (`reasoning: true` by default) | 5 | 0-3 | **YES (always active)** |
-| **5** (Lowest) | Native Control | Claude Code's `request.reasoning` | None | 0-4 | **NO (unreachable by default)** |
+| Priority        | Level                    | Source                                          | Overrides | Can be overridden by                     | Active by Default?              |
+|-----------------|--------------------------|-------------------------------------------------|-----------|------------------------------------------|---------------------------------|
+| **0** (Maximum) | Force Permanent Thinking | `forcePermanentThinking: true` in options       | All (1-5) | None (Nuclear Option - ignores all tags) | No                              |
+| **1** (Highest) | Ultrathink               | Message keyword "ultrathink"                    | 2-5       | 0                                        | No (user-triggered)             |
+| **2**           | User Tags                | `<Thinking:On\|Off>`, `<Effort:...>`            | 3-5       | 0-1                                      | No (user-triggered)             |
+| **3**           | Global Override          | `config.json` options                           | 4-5       | 0-2                                      | No (optional config)            |
+| **4**           | Model Config             | Transformer code (`reasoning: true` by default) | 5         | 0-3                                      | **YES (always active)**         |
+| **5** (Lowest)  | Native Control           | Claude Code's `request.reasoning`               | None      | 0-4                                      | **NO (unreachable by default)** |
 
 ---
 
@@ -1264,24 +1282,25 @@ Edit transformer code and set `reasoning: false` for all models:
 **Note:** This is NOT a priority level, but a feature that activates when conditions are met.
 
 **Activation requirements (ALL must be true):**
-1. ✓ `reasoning = true` (from any level 0-6)
-2. ✓ `keywordDetection = true` (from any level 0-6)
+1. ✓ `reasoning = true` (from any level 0-5)
+2. ✓ `keywordDetection = true` (from any level 0-5)
 3. ✓ Keywords detected in message text
 
 **When activated:** Transformer automatically enhances prompt with reasoning instructions.
 
 **Keywords that trigger enhancement (51 English keywords):**
 
-**Note:** The table below shows a summary of keyword categories. The complete list of 51 keywords is implemented in the transformer code (zai.js / zai-debug.js).
+The complete list of all 51 keywords implemented in the transformer code:
 
-| Category | Keywords |
-|----------|----------|
-| **Counting** | how many, count, number of, total, quantity |
-| **Analysis** | analyze, analyse, reason, think, deduce, infer, examine |
-| **Calculations** | calculate, solve, determine, compute |
-| **Explanations** | explain, demonstrate, detail, step by step, walk through |
-| **Identification** | identify, find, search, locate, discover |
-| **Comparisons** | compare, contrast, evaluate, assess, verify, check |
+| Category                             | Keywords                                                                                       |
+|--------------------------------------|------------------------------------------------------------------------------------------------|
+| **Counting questions**               | how many, how much, count, number of, total of, amount of                                      |
+| **Analysis and reasoning**           | analyze, analysis, reason, reasoning, think, thinking, deduce, deduction, infer, inference     |
+| **Calculations and problem-solving** | calculate, calculation, solve, solution, determine                                             |
+| **Detailed explanations**            | explain, explanation, demonstrate, demonstration, detail, detailed, step by step, step-by-step |
+| **Identification and search**        | identify, find, search, locate, enumerate, list                                                |
+| **Precision-requiring words**        | letters, characters, digits, numbers, figures, positions, position, index, indices             |
+| **Comparisons and evaluations**      | compare, comparison, evaluate, evaluation, verify, verification, check                         |
 
 **Example:**
 ```
@@ -1297,7 +1316,8 @@ Transformer detects "analyze" and "explain" → Adds reasoning instructions to p
 The transformer automatically ensures sampling parameters work correctly:
 
 **Automatic Configuration:**
-- Sets `do_sample=true` on every request (currently the Z.ai API default, but explicitly set in case the default changes)
+- Sets `do_sample=true` on every request (Z.ai API default is `true`, but explicitly set to guarantee consistent behavior)
+  - Reference: [Z.ai Chat Completion API Documentation](https://docs.z.ai/api-reference/llm/chat-completion)
 - Applies model-specific temperature:
   - GLM 4.6: 1.0 (more creative)
   - GLM 4.5 variants: 0.6 (balanced)
@@ -1310,11 +1330,11 @@ The transformer automatically ensures sampling parameters work correctly:
 
 **If you experience any problems with thinking or reasoning:**
 
-| Problem | See Section |
-|---------|-------------|
-| Model not thinking when expected | [Thinking Not Working](#thinking-not-working) |
-| Thinking blocks not visible in Claude Code | [Claude Code Not Displaying Thinking](#claude-code-not-displaying-thinking) |
-| Model keeps thinking despite disabling it | [Model Still Thinking Despite Disabling It](#model-still-thinking-despite-disabling-it) |
+| Problem                                    | See Section                                                                             |
+|--------------------------------------------|-----------------------------------------------------------------------------------------|
+| Model not thinking when expected           | [Thinking Not Working](#thinking-not-working)                                           |
+| Thinking blocks not visible in Claude Code | [Claude Code Not Displaying Thinking](#claude-code-not-displaying-thinking)             |
+| Model keeps thinking despite disabling it  | [Model Still Thinking Despite Disabling It](#model-still-thinking-despite-disabling-it) |
 
 **Common Solution for Mixed Transformer Issues:**
 
@@ -1538,6 +1558,207 @@ Edit `zai.js` and change all models to `reasoning: false`:
 
 ---
 
+### `reasoning_content` Not Visible in Debug Logs
+
+**Problem:** When using `zai-debug.js` for debugging, the `reasoning_content` field doesn't appear in logs, only processed `thinking` blocks are visible.
+
+**Cause:** CCR's built-in `reasoning` transformer processes and **removes** the original `reasoning_content` field before your custom transformers can see it.
+
+**How does the transformer flow work?**
+
+During the response phase, CCR executes transformers in this order:
+
+```
+LLM Response (with original reasoning_content)
+    ↓
+Model-specific transformers (reverse order)
+    ↓
+Provider-level transformers (reverse order)
+    ↓
+Final response to Claude Code
+```
+
+The `reasoning` transformer (implemented in `ReasoningTransformer`, `DeepseekTransformer`, etc.) does this during `transformResponseOut`:
+
+1. Extracts the `reasoning_content` field from the stream
+2. Converts it to standardized `thinking` blocks with signature
+3. **REMOVES the original `reasoning_content` field**
+
+**Why doesn't it appear in your logs?**
+
+If the `reasoning` transformer is configured in:
+- `provider.transformer.use` (provider-level) → executes BEFORE for all models
+- `provider.transformer.model_name.use` (model-specific) → executes BEFORE for that model
+
+When `zai-debug.js` executes afterward, the `reasoning_content` has already been **consumed and removed**, leaving only processed `thinking` blocks.
+
+**Example of problematic configuration:**
+
+```json
+"transformer": {
+  "use": [
+    "zai-debug",
+    "reasoning"  // ← Executes AFTER zai-debug, but already processed the response
+  ]
+}
+```
+
+**Solution:**
+
+To see original `reasoning_content` in `zai-debug.js` logs:
+
+**Option 1 (Recommended): Don't use the `reasoning` transformer**
+
+```json
+"transformer": {
+  "glm-4.6": {
+    "use": [
+      "zai-debug"  // ← Only use the debug transformer
+    ]
+  }
+}
+```
+
+**Result:**
+- ✓ You'll see original `reasoning_content` in logs
+- ✓ Complete debugging of data flow
+- ✗ Won't see thinking blocks in Claude Code interface
+
+**Option 2: Use only the `reasoning` transformer if you don't need detailed logs**
+
+```json
+"transformer": {
+  "glm-4.6": {
+    "use": [
+      "zai",         // ← Production version (no logs)
+      "reasoning"    // ← Shows thinking in Claude Code
+    ]
+  }
+}
+```
+
+**Result:**
+- ✓ Thinking blocks visible in Claude Code
+- ✗ Won't see `reasoning_content` in logs (already processed)
+
+**Option 3: Debug only when needed**
+
+Alternate between configurations as needed:
+
+```json
+// For debugging: Only zai-debug
+"use": ["zai-debug"]
+
+// For production: zai + reasoning
+"use": ["zai", "reasoning"]
+```
+
+**Technical references:**
+- Transformer pipeline: [musistudio/llms - Transformer Architecture](https://github.com/musistudio/llms)
+- ReasoningTransformer code: [reasoning.transformer.ts](https://github.com/musistudio/llms/blob/main/src/transformer/reasoning.transformer.ts)
+- Provider configuration: [musistudio/claude-code-router - Provider Configuration](https://github.com/musistudio/claude-code-router)
+
+---
+
+### Empty Thinking Blocks in Claude Code UI
+
+**Problem:** Claude Code shows "Thought for 1s" but when you open the thinking block, it appears empty or shows only whitespace.
+
+**Cause:** The LLM provider (Z.ai) sends `reasoning_content` chunks that contain only newline characters (`"\n"`) or whitespace. The `reasoning` transformer processes these chunks as valid thinking content and creates thinking blocks containing only those characters.
+
+**Why does this happen?**
+
+The `ReasoningTransformer` processes streaming responses and accumulates `reasoning_content`:
+
+1. When a chunk like `{"choices":[{"delta":{"reasoning_content":"\n"}}]}` arrives
+2. The transformer appends `"\n"` to the accumulated `reasoningContent` buffer
+3. It immediately creates a `thinking` block with `content: "\n"`
+4. This block is sent to Claude Code
+5. Claude Code displays the thinking indicator ("Thought for 1s") but the content is empty/whitespace
+
+**Example from logs:**
+
+```
+[CHUNK 1] 177 bytes [THINKING] → {role:"assistant", content:"", reasoning_content:"↵"}
+```
+
+This shows the LLM sent a `reasoning_content` chunk containing only a newline character.
+
+**Why doesn't the transformer filter these out?**
+
+The `ReasoningTransformer` does NOT validate or trim `reasoning_content` before creating thinking blocks. It directly uses whatever the LLM sends:
+
+```typescript
+// From reasoning.transformer.ts
+reasoningContent += data.choices?.[0]?.delta?.reasoning_content;
+// No trim() or validation - directly creates thinking block
+```
+
+The transformer only trims whitespace when processing leftover buffer data at stream end, not during the main `reasoning_content` transformation.
+
+**Is this a bug?**
+
+No, it's expected behavior. The transformer faithfully converts whatever `reasoning_content` the LLM sends. If the LLM sends whitespace/newlines, those become thinking blocks.
+
+**Solutions:**
+
+**Option 1: Use only custom transformers (no `reasoning`)**
+
+```json
+"transformer": {
+  "glm-4.6": {
+    "use": ["zai"]  // ← Only custom transformer
+  }
+}
+```
+
+**Result:**
+- ✓ No empty thinking blocks (custom transformers don't create them)
+- ✗ Won't see thinking blocks in Claude Code UI
+
+**Option 2: Accept the behavior**
+
+Some LLMs send these "breathing" newlines during thinking. It's part of their output pattern. The empty thinking blocks are harmless - they indicate the model is processing but hasn't generated meaningful reasoning content yet.
+
+**Option 3: Filter in Claude Code (not possible)**
+
+Claude Code doesn't filter thinking block content. It displays whatever it receives. This would require changes to Claude Code itself.
+
+**Technical explanation:**
+
+The issue occurs in the `ReasoningTransformer`'s stream processing:
+
+```typescript
+// Simplified from reasoning.transformer.ts
+if (data.choices?.[0]?.delta?.reasoning_content) {
+  reasoningContent += data.choices[0].delta.reasoning_content;  // ← Accumulates "\n"
+  
+  const thinkingChunk = {
+    choices: [{
+      delta: {
+        thinking: { content: reasoningContent }  // ← Creates block with "\n"
+      }
+    }]
+  };
+  
+  controller.enqueue(thinkingChunk);  // ← Sent to Claude Code
+}
+```
+
+No validation happens, so `"\n"` becomes a valid thinking block.
+
+**Related transformers:**
+
+Similar behavior exists in:
+- `DeepseekTransformer` - Also processes `reasoning_content` without trimming
+- `OpenrouterTransformer` - Also converts `reasoning` field without validation
+
+**Technical references:**
+- ReasoningTransformer source: [reasoning.transformer.ts](https://github.com/musistudio/llms/blob/main/src/transformer/reasoning.transformer.ts)
+- DeepseekTransformer source: [deepseek.transformer.ts](https://github.com/musistudio/llms/blob/main/src/transformer/deepseek.transformer.ts)
+
+---
+
 ### CCR Won't Start
 
 **Problem:** `ccr: command not found`
@@ -1729,10 +1950,10 @@ rm ~/.claude-code-router/logs/zai-transformer-*.log
       ],
       "transformer": {
         "glm-4.6": {
-          "use": [            
+          "use": [
             ["reasoning", {"enable": true}],
             ["maxtoken", {"max_tokens": 131072}],
-            ["sampling", {"temperature": 1.0, "top_p": 0.95}],
+            ["sampling", {"temperature": 1.0, "top_p": 0.95}]
           ]
         },
         "glm-4.5": {

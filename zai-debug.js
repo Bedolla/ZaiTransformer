@@ -56,6 +56,10 @@
 //    - Effort tags: <Effort:Low|Medium|High>
 //    - Direct control over reasoning without modifying configuration
 //    - High priority: Overrides global overrides and model configuration
+//    - IMPORTANT HIERARCHY: <Effort> has HIGHER priority than <Thinking:Off>
+//      • <Thinking:Off> alone → reasoning disabled
+//      • <Thinking:Off> + <Effort:High> → reasoning enabled (Effort overrides)
+//      • <Effort> alone → reasoning enabled
 //
 // 8. FORCE PERMANENT THINKING (Level 0 - Maximum Priority)
 //    - Option: forcePermanentThinking (in transformer options)
@@ -70,10 +74,12 @@
 //   Priority 2: Custom Tags (<Thinking>/<Effort>) → Direct user control
 //   Priority 3: Global Override (overrideReasoning) → Applied to all models
 //   Priority 4: Model Configuration (config.reasoning) → Hardcoded per model (reasoning=true by default)
-//   Priority 5: Default → Only active when NO other level is active
+//   Priority 5: Claude Code → Only active when NO user conditions (0-3) AND model reasoning=false
 //
-//   NOTE: With default config (reasoning=true for all models), Priority 4 is always active,
-//         making Claude Code's native toggle (Tab key / alwaysThinkingEnabled) ineffective.
+//   NOTE: With default config (reasoning=true for all models), Priority 4 applies model defaults.
+//         Priority 5 (Claude Code's native toggle) only works when:
+//         - No user conditions (Levels 0-3) are active AND
+//         - Model has reasoning=false in configuration
 //
 // KEYWORD SYSTEM (Independent):
 //   - REQUIRES 3 simultaneous conditions: reasoning=true + keywordDetection=true + keywords detected
@@ -99,6 +105,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 /**
  * Cache control settings for messages and content blocks
@@ -209,8 +216,8 @@ const path = require('path');
  * @typedef {Object} UnifiedMessage
  * @property {"user"|"assistant"|"system"|"tool"} role - Message role in conversation
  * @property {string|null|MessageContent[]} content - Message content (string, null, or structured blocks)
- * @property {ToolCall[]} [tool_calls] - Tool/function calls made by assistant
- * @property {string} [tool_call_id] - ID of tool call this message is responding to (for role="tool")
+ * @property {ToolCall[]} [tool_calls] - Tool/function calls made by assistant (OpenAI format - reserved for future compatibility)
+ * @property {string} [tool_call_id] - ID of tool call this message is responding to for role="tool" (OpenAI format - reserved for future compatibility)
  * @property {CacheControl} [cache_control] - Cache control settings for this message
  * @property {ThinkingBlock} [thinking] - Reasoning/thinking content from model
  */
@@ -434,12 +441,14 @@ class ZaiTransformer {
 
     /**
      * Log buffer for asynchronous writing (avoids blocking event loop)
+     * Protected against memory leaks: auto-flushes at 1000 items or every 100ms
      * @type {string[]}
      */
     this.logBuffer = [];
 
     /**
      * Timeout for automatic log buffer flush
+     * Cleared automatically on each flush to prevent memory leaks
      * @type {ReturnType<typeof setTimeout>|null}
      */
     this.flushTimeout = null;
@@ -464,6 +473,7 @@ class ZaiTransformer {
 
     /**
       * Request counter to identify unique requests
+      * Auto-resets to 1 when reaching Number.MAX_SAFE_INTEGER - 1000 for safety
       * @type {number}
       */
     this.requestCounter = 0;
@@ -476,6 +486,7 @@ class ZaiTransformer {
 
     /**
       * Response ID counter for unique response identification
+      * Auto-resets to 1 when reaching Number.MAX_SAFE_INTEGER - 1000 for safety
       * @type {number}
       */
     this.responseIdCounter = 0;
@@ -600,13 +611,13 @@ class ZaiTransformer {
     /**
      * Path to debug log file
      * Each session creates its own timestamped file:
-     * ~/.Claude-Code-Router/Logs/zai-transformer-[timestamp].log
+     * ~/.claude-code-router/logs/zai-transformer-[timestamp].log
      * 
      * Rotates automatically when reaching size limit (default: 10 MB)
      * Rotated files: zai-transformer-[timestamp]-part[N].log
      * @type {string}
      */
-    const logsDirectory = path.join(process.env.USERPROFILE || process.env.HOME, '.claude-code-router', 'logs');
+    const logsDirectory = path.join(os.homedir(), '.claude-code-router', 'logs');
     if (!fs.existsSync(logsDirectory)) {
       fs.mkdirSync(logsDirectory, { recursive: true });
     }
@@ -702,7 +713,7 @@ class ZaiTransformer {
   }
 
   /**
-   * Safe JSON.stringify that handles circular references
+   * Safe JSON.stringify that handles circular references and limits depth
    * @param {any} obj - Object to serialize
    * @param {number} [maxDepth=3] - Maximum recursion depth
    * @param {string} [indent=''] - Additional indentation for each line
@@ -711,6 +722,7 @@ class ZaiTransformer {
   safeJSON (obj, maxDepth = 3, indent = '') {
     try {
       const seen = new WeakSet();
+
       const json = JSON.stringify(obj, (key, value) => {
         // Avoid circular references
         if (typeof value === 'object' && value !== null) {
@@ -795,6 +807,24 @@ class ZaiTransformer {
   }
 
   /**
+   * Extracts text content from a message (handles both string and array formats)
+   * @param {UnifiedMessage} message - Message to extract text from
+   * @returns {string} Extracted text or empty string
+   * @private
+   */
+  _extractMessageText (message) {
+    if (typeof message.content === 'string') {
+      return message.content;
+    } else if (Array.isArray(message.content)) {
+      return message.content
+        .filter(c => c.type === 'text' && c.text)
+        .map(c => c.text)
+        .join(' ');
+    }
+    return '';
+  }
+
+  /**
    * Enhances prompt by adding reasoning instructions
    * @param {string} content - Original prompt content
    * @param {boolean} isUltrathink - If Ultrathink mode is active
@@ -804,8 +834,8 @@ class ZaiTransformer {
     let reasoningInstruction;
 
     if (isUltrathink) {
-      // Ultrathink active: more intensive instructions with natural ULTRATHINK integration
-      reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis with ULTRATHINK mode engaged. Think step by step, analyze every aspect thoroughly, consider multiple perspectives, and show your detailed reasoning before answering.]\n\n";
+      // Ultrathink active: intensive instructions with explanation and memory warning
+      reasoningInstruction = "\n\n[IMPORTANT: ULTRATHINK mode activated. (ULTRATHINK is the user's keyword requesting exceptionally thorough analysis from you as an AI model.) This means: DO NOT rely on your memory or assumptions - read and analyze everything carefully as if seeing it for the first time. Break down the problem step by step showing your complete reasoning, analyze each aspect meticulously by reading the actual current content (things may have changed since you last saw them), consider multiple perspectives and alternative approaches, verify logic coherence at each stage, and present well-founded conclusions with maximum level of detail based on what you actually read, not what you remember.]\n\n";
     } else {
       // Normal mode: standard instructions
       reasoningInstruction = "\n\n[IMPORTANT: This question requires careful analysis. Think step by step and show your detailed reasoning before answering.]\n\n";
@@ -826,6 +856,12 @@ class ZaiTransformer {
   async transformRequestIn (request, provider, context) {
     // Increment request counter and store current request ID
     this.requestCounter++;
+
+    // Auto-reset counter when approaching maximum safe integer
+    if (this.requestCounter >= Number.MAX_SAFE_INTEGER - 1000) {
+      this.requestCounter = 1;
+    }
+
     const currentRequestId = this.requestCounter;
 
     this.log('');
@@ -941,8 +977,9 @@ class ZaiTransformer {
     const config = this.getModelConfiguration(modelName);
 
     // Create copy of request with optimized parameters
-    // Global override has the highest priority: globalOverrides.maxTokens || config.maxTokens || defaultMaxTokens
-    const finalMaxTokens = this.globalOverrides.maxTokens || config.maxTokens;
+    // Global override has the highest priority: globalOverrides.maxTokens ?? config.maxTokens ?? defaultMaxTokens
+    // Use nullish coalescing (??) to allow 0 as valid override value
+    const finalMaxTokens = this.globalOverrides.maxTokens ?? config.maxTokens;
 
     const modifiedRequest = {
       ...request,
@@ -955,7 +992,7 @@ class ZaiTransformer {
     } else if (request.max_tokens !== config.maxTokens) {
       this.log(`   [OVERRIDE] Original max_tokens: ${request.max_tokens} → Override to ${finalMaxTokens}`);
     }
-    // max_tokens already set in line 922, no need to reassign
+    // max_tokens already set in line 984, no need to reassign
 
     // Detect custom tags in user messages
     // Priority: Force Permanent Thinking (0) > Ultrathink (1) > User Tags (2) > Global Override (3) > Model Config (4) > Claude Code (5)
@@ -971,15 +1008,7 @@ class ZaiTransformer {
       for (let i = 0; i < request.messages.length; i++) {
         const message = request.messages[i];
         if (message.role === 'user') {
-          let messageText = '';
-          if (typeof message.content === 'string') {
-            messageText = message.content;
-          } else if (Array.isArray(message.content)) {
-            messageText = message.content
-              .filter(c => c.type === 'text' && c.text)
-              .map(c => c.text)
-              .join(' ');
-          }
+          const messageText = this._extractMessageText(message);
 
           // Skip system-reminders
           if (messageText.trim().startsWith('<system-reminder>')) {
@@ -987,7 +1016,7 @@ class ZaiTransformer {
             continue;
           }
 
-          // Detect Ultrathink (case insensitive) - NOTE: Keep in message for English version
+          // Detect Ultrathink (case insensitive)
           if (/\bultrathink\b/i.test(messageText)) {
             ultrathinkDetected = true;
             this.log(`   [TAG DETECTED] Ultrathink found in message ${i} (will be KEPT in message)`);
@@ -1042,10 +1071,11 @@ class ZaiTransformer {
         const thinkingLower = thinkingTag.toLowerCase();
         if (thinkingLower === 'off') {
           // Thinking explicitly OFF
-          // BUT: If effort tag present, assume reasoning wanted
-          effectiveReasoning = effortTag ? true : false;
+          // HIERARCHY: Effort tag has HIGHER priority than Thinking:Off
+          // If effort tag present, it overrides Thinking:Off and enables reasoning
+          effectiveReasoning = !!effortTag;
           if (effortTag) {
-            this.log(`   <Thinking:${thinkingTag}> but <Effort:${effortTag}> present → reasoning=true (effort implies reasoning)`);
+            this.log(`   <Thinking:${thinkingTag}> but <Effort:${effortTag}> present → reasoning=true (Effort overrides Thinking:Off)`);
           } else {
             this.log(`   <Thinking:${thinkingTag}> → reasoning=false (explicitly disabled)`);
           }
@@ -1093,7 +1123,7 @@ class ZaiTransformer {
 
     this.log(`   [RESULT] Effective reasoning=${effectiveReasoning}, effort level=${effortLevel}`);
 
-    // Remove tags from ALL user messages (English version: remove Effort and Thinking, KEEP Ultrathink)
+    // Remove tags from ALL user messages
     this.log('');
     this.log('   [CLEANUP] Removing tags from messages...');
     let tagsRemovedCount = 0;
@@ -1114,7 +1144,7 @@ class ZaiTransformer {
             newText = newText.replace(/<Effort:(Low|Medium|High)>/gi, '');
             newText = newText.replace(/<Thinking:(On|Off)>/gi, '');
 
-            if (newText !== message.content) {
+            if (newText !== originalText) {
               textModified = true;
               tagsRemovedCount++;
               this.log(`   Message ${i}: Tags removed`);
@@ -1162,13 +1192,39 @@ class ZaiTransformer {
     }
 
     // Add reasoning field with effort level to request
-    // Only override if there's Ultrathink, user tags, global override, or config.reasoning
+    // Separate user-initiated conditions from model configuration
     this.log('');
     this.log('   [REASONING FIELD] Adding reasoning field to request...');
-    const hasActiveConditions = ultrathinkDetected || thinkingTag || effortTag || this.globalOverrides.reasoning !== null || config.reasoning === true;
+    const hasUserConditions = this.forcePermanentThinking || ultrathinkDetected || thinkingTag || effortTag || this.globalOverrides.reasoning !== null;
 
-    if (hasActiveConditions) {
-      this.log(`   [INFO] Active conditions detected, overriding reasoning`);
+    if (hasUserConditions) {
+      // User explicitly set reasoning (Levels 0-3): override everything
+      this.log(`   [INFO] User conditions detected (Levels 0-3), overriding reasoning`);
+      if (effectiveReasoning) {
+        modifiedRequest.reasoning = {
+          enabled: true,
+          effort: effortLevel
+        };
+        this.log(`   reasoning.enabled = true`);
+        this.log(`   reasoning.effort = "${effortLevel}"`);
+
+        // Apply provider thinking format
+        const providerName = config.provider;
+        if (this.reasoningFormatters[providerName]) {
+          this.reasoningFormatters[providerName](modifiedRequest, modelName);
+          this.log(`   [THINKING] ${providerName} format applied`);
+        } else {
+          this.log(`   [OMISSION] thinking NOT added (no formatter for ${providerName})`);
+        }
+      } else {
+        modifiedRequest.reasoning = {
+          enabled: false
+        };
+        this.log(`   reasoning.enabled = false`);
+      }
+    } else if (config.reasoning === true) {
+      // No user conditions but model supports reasoning (Level 4): use model default
+      this.log(`   [INFO] No user conditions, using model configuration (Level 4)`);
       if (effectiveReasoning) {
         modifiedRequest.reasoning = {
           enabled: true,
@@ -1192,10 +1248,10 @@ class ZaiTransformer {
         this.log(`   reasoning.enabled = false`);
       }
     } else {
-      // No active conditions: pass original reasoning from Claude Code if exists
+      // No user conditions and model doesn't have reasoning config (Level 5): pass Claude Code's reasoning
       if (request.reasoning) {
         modifiedRequest.reasoning = request.reasoning;
-        this.log(`   [INFO] No active conditions, passing original reasoning from Claude Code`);
+        this.log(`   [INFO] No user conditions and no model config, passing Claude Code reasoning (Level 5)`);
         this.log(`   reasoning = ${JSON.stringify(request.reasoning)}`);
 
         // If original reasoning is enabled, apply provider format
@@ -1209,7 +1265,7 @@ class ZaiTransformer {
           }
         }
       } else {
-        this.log(`   [INFO] No active conditions and no original reasoning, field not added`);
+        this.log(`   [INFO] No conditions and no original reasoning (Level 5), field not added`);
       }
     }
 
@@ -1244,15 +1300,7 @@ class ZaiTransformer {
         // Only analyze user messages for keywords
         if (message.role === 'user') {
           // Extract text from message (can be string or array of contents)
-          let messageText = '';
-          if (typeof message.content === 'string') {
-            messageText = message.content;
-          } else if (Array.isArray(message.content)) {
-            messageText = message.content
-              .filter(c => c.type === 'text' && c.text)
-              .map(c => c.text)
-              .join(' ');
-          }
+          const messageText = this._extractMessageText(message);
 
           // Skip automatic Claude Code system-reminder messages
           if (messageText.trim().startsWith('<system-reminder>')) {
@@ -1303,15 +1351,7 @@ class ZaiTransformer {
           // Enhancement always targets user messages only
           if (message.role === 'user') {
             // Extract text from message
-            let messageText = '';
-            if (typeof message.content === 'string') {
-              messageText = message.content;
-            } else if (Array.isArray(message.content)) {
-              messageText = message.content
-                .filter(c => c.type === 'text' && c.text)
-                .map(c => c.text)
-                .join(' ');
-            }
+            const messageText = this._extractMessageText(message);
 
             // Skip system-reminders
             if (messageText.trim().startsWith('<system-reminder>')) {
@@ -1488,6 +1528,12 @@ class ZaiTransformer {
 
       // Generate unique ID for this Response object using counter + timestamp
       this.responseIdCounter++;
+
+      // Auto-reset counter when approaching maximum safe integer
+      if (this.responseIdCounter >= Number.MAX_SAFE_INTEGER - 1000) {
+        this.responseIdCounter = 1;
+      }
+
       const responseId = `${Date.now()}-${this.responseIdCounter}`;
 
       this.log(`   [INFO] Response for Request #${requestId} | Response Object ID: ${responseId}`);
@@ -1633,7 +1679,7 @@ class ZaiTransformer {
         }
 
         this.flushLogs();
-      })().catch(() => { }); // Execute in background, catch to silence unhandled rejection warnings
+      })().catch(() => { /* Ignore stream cancellation error */ }); // Execute in background, catch to silence unhandled rejection warnings
 
       // Return Response immediately (don't wait for chunk reading)
       return response;
