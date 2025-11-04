@@ -809,21 +809,16 @@ class ZaiTransformer {
       }
     } else if (config.reasoning === true) {
       // No user conditions but model supports reasoning (Level 4): use model default
-      if (effectiveReasoning) {
-        modifiedRequest.reasoning = {
-          enabled: true,
-          effort: effortLevel
-        };
+      // effectiveReasoning is always true here (set in line 731)
+      modifiedRequest.reasoning = {
+        enabled: true,
+        effort: effortLevel
+      };
 
-        // Apply provider thinking format
-        const providerName = config.provider;
-        if (this.reasoningFormatters[providerName]) {
-          this.reasoningFormatters[providerName](modifiedRequest, modelName);
-        }
-      } else {
-        modifiedRequest.reasoning = {
-          enabled: false
-        };
+      // Apply provider thinking format
+      const providerName = config.provider;
+      if (this.reasoningFormatters[providerName]) {
+        this.reasoningFormatters[providerName](modifiedRequest, modelName);
       }
     } else {
       // No user conditions and model doesn't have reasoning config (Level 5): pass Claude Code's reasoning

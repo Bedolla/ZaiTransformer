@@ -1224,28 +1224,22 @@ class ZaiTransformer {
       }
     } else if (config.reasoning === true) {
       // No user conditions but model supports reasoning (Level 4): use model default
+      // effectiveReasoning is always true here (set in line 1113)
       this.log(`   [INFO] No user conditions, using model configuration (Level 4)`);
-      if (effectiveReasoning) {
-        modifiedRequest.reasoning = {
-          enabled: true,
-          effort: effortLevel
-        };
-        this.log(`   reasoning.enabled = true`);
-        this.log(`   reasoning.effort = "${effortLevel}"`);
+      modifiedRequest.reasoning = {
+        enabled: true,
+        effort: effortLevel
+      };
+      this.log(`   reasoning.enabled = true`);
+      this.log(`   reasoning.effort = "${effortLevel}"`);
 
-        // Apply provider thinking format
-        const providerName = config.provider;
-        if (this.reasoningFormatters[providerName]) {
-          this.reasoningFormatters[providerName](modifiedRequest, modelName);
-          this.log(`   [THINKING] ${providerName} format applied`);
-        } else {
-          this.log(`   [OMISSION] thinking NOT added (no formatter for ${providerName})`);
-        }
+      // Apply provider thinking format
+      const providerName = config.provider;
+      if (this.reasoningFormatters[providerName]) {
+        this.reasoningFormatters[providerName](modifiedRequest, modelName);
+        this.log(`   [THINKING] ${providerName} format applied`);
       } else {
-        modifiedRequest.reasoning = {
-          enabled: false
-        };
-        this.log(`   reasoning.enabled = false`);
+        this.log(`   [OMISSION] thinking NOT added (no formatter for ${providerName})`);
       }
     } else {
       // No user conditions and model doesn't have reasoning config (Level 5): pass Claude Code's reasoning
