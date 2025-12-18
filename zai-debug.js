@@ -541,6 +541,17 @@ class ZaiTransformer {
         reasoning: true,                // Supports native reasoning (model decides when to use it)
         keywordDetection: true,         // Enable automatic prompt enhancement when analytical keywords detected
         provider: 'Z.AI'
+      },
+
+      // GLM 4.6v - Vision and multimodal with extended output
+      'glm-4.6v': {
+        maxTokens: 32 * 1024,           // 32,768 (32K)
+        contextWindow: 128 * 1024,      // 131,072 (128K)
+        temperature: 0.6,               // Official value
+        topP: 0.95,                     // Official value
+        reasoning: true,                // Supports native reasoning (model decides when to use it)
+        keywordDetection: true,         // Enable automatic prompt enhancement when analytical keywords detected
+        provider: 'Z.AI'
       }
     };
 

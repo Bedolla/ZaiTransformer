@@ -177,13 +177,13 @@ build_git_indicators() {
   local indicators=""
   
   # Build indicator string with emoji + count for each status
-  [[ $staged -gt 0 ]] && indicators+="✅$staged "        # ✅ Staged files
-  [[ $modified -gt 0 ]] && indicators+="✏️$modified "    # ✏️ Modified files
-  [[ $untracked -gt 0 ]] && indicators+="📄$untracked "  # 📄 Untracked files
-  [[ $deleted -gt 0 ]] && indicators+="🗑️$deleted "      # 🗑️ Deleted files
-  [[ $conflict -gt 0 ]] && indicators+="⚠️$conflict "    # ⚠️ Conflicts
-  [[ $ahead -gt 0 ]] && indicators+="⬆️$ahead "          # ⬆️ Commits ahead
-  [[ $behind -gt 0 ]] && indicators+="⬇️$behind "        # ⬇️ Commits behind
+  [[ $staged -gt 0 ]] && indicators+="✅$staged "         # ✅ Staged files
+  [[ $modified -gt 0 ]] && indicators+="✏️ $modified "     # ✏️ Modified files
+  [[ $untracked -gt 0 ]] && indicators+="📄$untracked "    # 📄 Untracked files
+  [[ $deleted -gt 0 ]] && indicators+="🗑️ $deleted "       # 🗑️ Deleted files
+  [[ $conflict -gt 0 ]] && indicators+="⚠️ $conflict "     # ⚠️ Conflicts
+  [[ $ahead -gt 0 ]] && indicators+="⬆️ $ahead "           # ⬆️ Commits ahead
+  [[ $behind -gt 0 ]] && indicators+="⬇️ $behind "         # ⬇️ Commits behind
   
   # Return formatted status
   if [[ -z "$indicators" && "$clean" == "true" ]]; then
@@ -302,6 +302,7 @@ get_model_name() {
   name=$(echo "$name" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
   
   # Apply specific corrections for known model names (ordered from most specific to most generic)
+  name="${name//Glm-4.6-V/GLM 4.6 V}"
   name="${name//Glm-4.6/GLM 4.6}"
   name="${name//Glm-4.5-Air/GLM 4.5 Air}"
   name="${name//Glm-4.5-V/GLM 4.5 V}"

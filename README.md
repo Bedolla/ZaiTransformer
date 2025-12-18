@@ -70,6 +70,7 @@ The transformer supports all Z.ai GLM models with optimized configurations:
 | Model             | Max Output Tokens | Context Window | Temperature | Top-P | Reasoning |
 |-------------------|-------------------|----------------|-------------|-------|-----------|
 | **GLM 4.6**       | 128K (131,072)    | 200K (204,800) | 1.0         | 0.95  | ✓         |
+| **GLM 4.6v**      | 32K (32,768)      | 128K (131,072) | 0.6         | 0.95  | ✓         |
 | **GLM 4.5**       | 96K (98,304)      | 128K (131,072) | 0.6         | 0.95  | ✓         |
 | **GLM 4.5-air**   | 96K (98,304)      | 128K (131,072) | 0.6         | 0.95  | ✓         |
 | **GLM 4.5v**      | 16K (16,384)      | 128K (131,072) | 0.6         | 0.95  | ✓         |
@@ -224,7 +225,7 @@ ccr version
     "longContext": "ZAI,glm-4.6",
     "longContextThreshold": 204800,
     "webSearch": "ZAI,glm-4.6",
-    "image": "ZAI,glm-4.5v"
+    "image": "ZAI,glm-4.6v"
   }
 }
 ```
@@ -1987,7 +1988,7 @@ rm ~/.claude-code-router/logs/zai-transformer-*.log
     "longContext": "ZAI,glm-4.6",
     "longContextThreshold": 204800,
     "webSearch": "ZAI,glm-4.6",
-    "image": "ZAI,glm-4.5v"
+    "image": "ZAI,glm-4.6v"
   }
 }
 ```

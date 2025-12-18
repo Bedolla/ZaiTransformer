@@ -183,7 +183,7 @@ class GitStatus {
     }
     if ($this.ModifiedFiles -gt 0) {
       # ✏️ Modified files (unstaged)
-      $indicators.Add("$([char]::ConvertFromUtf32(0x270F))$([char]::ConvertFromUtf32(0xFE0F)) $($this.ModifiedFiles)")  # ✏️
+      $indicators.Add("$([char]::ConvertFromUtf32(0x270F))$([char]::ConvertFromUtf32(0xFE0F))  $($this.ModifiedFiles)")  # ✏️
     }
     if ($this.UntrackedFiles -gt 0) {
       # 📄 New files without tracking
@@ -191,19 +191,19 @@ class GitStatus {
     }
     if ($this.DeletedFiles -gt 0) {
       # 🗑️ Deleted files
-      $indicators.Add("$([char]::ConvertFromUtf32(0x1F5D1))$([char]::ConvertFromUtf32(0xFE0F)) $($this.DeletedFiles)")  # 🗑️
+      $indicators.Add("$([char]::ConvertFromUtf32(0x1F5D1))$([char]::ConvertFromUtf32(0xFE0F))  $($this.DeletedFiles)")  # 🗑️
     }
     if ($this.ConflictFiles -gt 0) {
       # ⚠️ Files with conflicts
-      $indicators.Add("$([char]::ConvertFromUtf32(0x26A0))$([char]::ConvertFromUtf32(0xFE0F)) $($this.ConflictFiles)")  # ⚠️
+      $indicators.Add("$([char]::ConvertFromUtf32(0x26A0))$([char]::ConvertFromUtf32(0xFE0F))  $($this.ConflictFiles)")  # ⚠️
     }
     if ($this.CommitsAhead -gt 0) {
       # ⬆️ Commits ahead of remote
-      $indicators.Add("$([char]::ConvertFromUtf32(0x2B06))$([char]::ConvertFromUtf32(0xFE0F)) $($this.CommitsAhead)")  # ⬆️
+      $indicators.Add("$([char]::ConvertFromUtf32(0x2B06))$([char]::ConvertFromUtf32(0xFE0F))  $($this.CommitsAhead)")  # ⬆️
     }
     if ($this.CommitsBehind -gt 0) {
       # ⬇️ Commits behind remote
-      $indicators.Add("$([char]::ConvertFromUtf32(0x2B07))$([char]::ConvertFromUtf32(0xFE0F)) $($this.CommitsBehind)")  # ⬇️
+      $indicators.Add("$([char]::ConvertFromUtf32(0x2B07))$([char]::ConvertFromUtf32(0xFE0F))  $($this.CommitsBehind)")  # ⬇️
     }
 
     # Return formatted status
@@ -373,6 +373,7 @@ class StatusLineRenderer {
     $modelName = (Get-Culture).TextInfo.ToTitleCase($modelName.ToLower())
     
     # Apply specific corrections for known model names (ordered from most specific to most generic)
+    $modelName = $modelName.Replace("Glm-4.6-V", "GLM 4.6 V")
     $modelName = $modelName.Replace("Glm-4.6", "GLM 4.6")
     $modelName = $modelName.Replace("Glm-4.5-Air", "GLM 4.5 Air")
     $modelName = $modelName.Replace("Glm-4.5-V", "GLM 4.5 V")
